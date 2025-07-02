@@ -2,41 +2,39 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 import requests
+import yaml
 import json
+import os
 
 LLAMA_SERVER_URL = "http://localhost:8000/v1/completions"
 LLM_MODEL_NAME = "mistral"
+CAPS_FILE = os.path.expanduser("~/ros2_ws/src/ros_prompt/config/robot_caps.yaml")  # Update path as needed
 
 class PlannerNode(Node):
     def __init__(self):
         super().__init__('planner_node')
-        self.capabilities = None
-        self.world_state = self.get_initial_world_state()  # Could be a future subscriber
+        self.capabilities = self.load_capabilities(CAPS_FILE)
+        self.world_state = self.get_initial_world_state()  # You might want to subscribe for updates later
 
-        self.cap_sub = self.create_subscription(
-            String,
-            '/capabilities',
-            self.capabilities_callback,
-            10
-        )
-        self.intent_sub = self.create_subscription(
+        self.subscription = self.create_subscription(
             String,
             '/intent',
             self.intent_callback,
             10
         )
-        self.bt_pub = self.create_publisher(
+        self.bt_publisher = self.create_publisher(
             String,
             '/behavior_tree',
             10
         )
 
-    def capabilities_callback(self, msg):
+    def load_capabilities(self, path):
         try:
-            self.capabilities = json.loads(msg.data)
-            self.get_logger().info("Updated capabilities manifest.")
+            with open(path, 'r') as f:
+                return yaml.safe_load(f)
         except Exception as e:
-            self.get_logger().error(f"Error parsing capabilities: {e}")
+            self.get_logger().error(f"Could not load capabilities: {e}")
+            return {}
 
     def get_initial_world_state(self):
         # For now, just stub in a fixed state
@@ -46,9 +44,6 @@ class PlannerNode(Node):
         }
 
     def intent_callback(self, msg):
-        if self.capabilities is None:
-            self.get_logger().warn("Capabilities not yet received. Skipping planning.")
-            return
         try:
             intent = json.loads(msg.data)
             self.get_logger().info(f"Received intent: {intent}")
@@ -62,6 +57,7 @@ class PlannerNode(Node):
             self.get_logger().error(f"Intent processing error: {e}")
 
     def build_prompt(self, intent):
+        # You may want to tune this for best LLM performance
         prompt = (
             "Given the following robot intent, capabilities, and world state, "
             "generate a behavior tree in BT.CPP/Nav2 XML format that the robot can execute.\n"
@@ -94,7 +90,7 @@ class PlannerNode(Node):
     def publish_behavior_tree(self, bt_xml):
         msg = String()
         msg.data = bt_xml
-        self.bt_pub.publish(msg)
+        self.bt_publisher.publish(msg)
         self.get_logger().info("Published new behavior tree.")
 
 def main(args=None):
