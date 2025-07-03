@@ -1,108 +1,86 @@
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
-import requests
+import yaml
 import json
+from ament_index_python.packages import get_package_share_directory
+from rclpy.qos import QoSProfile, QoSDurabilityPolicy
+import os
 
-LLAMA_SERVER_URL = "http://localhost:8000/v1/completions"
-LLM_MODEL_NAME = "mistral"
+def discover_actions(node):
+    """Return a dict of {action_base_name: action_type} for available actions."""
+    service_types = dict(node.get_service_names_and_types())
+    actions = {}
+    for service, types in service_types.items():
+        if service.endswith('/_action/send_goal'):
+            action_base = service[:-len('/_action/send_goal')]
+            action_type = types[0]
+            # Optionally clean up the type (strip _SendGoal)
+            if action_type.endswith('_SendGoal'):
+                action_type = action_type[:-len('_SendGoal')]
+            actions[action_base] = action_type
+    return actions
 
-class PlannerNode(Node):
+class CapabilityScannerNode(Node):
     def __init__(self):
-        super().__init__('planner_node')
-        self.capabilities = None
-        self.world_state = self.get_initial_world_state()  # Could be a future subscriber
+        super().__init__('capability_scanner')
+        # Load param
+        self.declare_parameter('robot_caps', '')
+        caps = self.get_parameter('robot_caps').get_parameter_value().string_value
+        self.get_logger().info(f"Robot capabilities parameter: {caps}")
 
-        self.cap_sub = self.create_subscription(
-            String,
-            '/capabilities',
-            self.capabilities_callback,
-            10
-        )
-        self.intent_sub = self.create_subscription(
-            String,
-            '/intent',
-            self.intent_callback,
-            10
-        )
-        self.bt_pub = self.create_publisher(
-            String,
-            '/behavior_tree',
-            10
-        )
+        if not caps:
+            config_path = os.path.join(
+                get_package_share_directory('ros_prompt'),
+                'config',
+                'robot_caps.yaml'
+            )
+            self.get_logger().info(f"Loading robot capabilities from default config: {config_path}")
+            with open(config_path, 'r') as f:
+                caps_dict = yaml.safe_load(f)
+            
+            self.get_logger().info(f"Loaded robot capabilities: {caps_dict}")
+            caps = caps_dict['robot_caps'] if 'robot_caps' in caps_dict else caps_dict
+            self.get_logger().info(f"Using robot capabilities: {caps}")
+        else:
+            # Try to parse if it's a string, else assume it's already a dict
+            try:
+                caps_dict = yaml.safe_load(caps)
+                caps = caps_dict['robot_caps'] if 'robot_caps' in caps_dict else caps_dict
+            except Exception:
+                pass  # Already a dict, or not parseable as YAML
+        self.robot_caps = caps
 
-    def capabilities_callback(self, msg):
-        try:
-            self.capabilities = json.loads(msg.data)
-            self.get_logger().info("Updated capabilities manifest.")
-        except Exception as e:
-            self.get_logger().error(f"Error parsing capabilities: {e}")
+        # Discover live
+        topics = dict(self.get_topic_names_and_types())
+        self.get_logger().info(f"Discovered topics: {topics}")
+        actions = discover_actions(self)
+        self.get_logger().info(f"Discovered actions: {actions}")
+        services = dict(self.get_service_names_and_types())
+        self.get_logger().info(f"Discovered services: {services}")
 
-    def get_initial_world_state(self):
-        # For now, just stub in a fixed state
-        return {
-            "battery": "full",
-            "location": "charging_dock"
+        def filter_alive(caps, discovered):
+            return [cap for cap in caps if cap['name'] in discovered]
+
+        manifest = {
+            "topics": filter_alive(self.robot_caps.get('topics', []), topics),
+            "actions": filter_alive(self.robot_caps.get('actions', []), actions),
+            "services": filter_alive(self.robot_caps.get('services', []), services),
         }
+        self.get_logger().info(f"Filtered capabilities manifest: {manifest}")
 
-    def intent_callback(self, msg):
-        if self.capabilities is None:
-            self.get_logger().warn("Capabilities not yet received. Skipping planning.")
-            return
-        try:
-            intent = json.loads(msg.data)
-            self.get_logger().info(f"Received intent: {intent}")
-
-            prompt = self.build_prompt(intent)
-            bt_xml = self.query_llm(prompt)
-
-            if bt_xml:
-                self.publish_behavior_tree(bt_xml)
-        except Exception as e:
-            self.get_logger().error(f"Intent processing error: {e}")
-
-    def build_prompt(self, intent):
-        prompt = (
-            "Given the following robot intent, capabilities, and world state, "
-            "generate a behavior tree in BT.CPP/Nav2 XML format that the robot can execute.\n"
-            f"Intent: {json.dumps(intent)}\n"
-            f"Capabilities: {json.dumps(self.capabilities)}\n"
-            f"World state: {json.dumps(self.world_state)}\n"
-            "Respond ONLY with the XML, no extra explanation."
+        # Publish manifest
+        qos_profile = QoSProfile(
+            depth=1,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL
         )
-        return prompt
-
-    def query_llm(self, prompt):
-        headers = {"Content-Type": "application/json"}
-        payload = {
-            "model": LLM_MODEL_NAME,
-            "prompt": prompt,
-            "max_tokens": 1024,
-            "temperature": 0.2
-        }
-        try:
-            response = requests.post(LLAMA_SERVER_URL, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-            completion = data['choices'][0]['text']
-            self.get_logger().info("Received behavior tree from LLM.")
-            return completion.strip()
-        except Exception as e:
-            self.get_logger().error(f"LLM request failed: {e}")
-            return None
-
-    def publish_behavior_tree(self, bt_xml):
-        msg = String()
-        msg.data = bt_xml
-        self.bt_pub.publish(msg)
-        self.get_logger().info("Published new behavior tree.")
+        self.pub = self.create_publisher(String, '/capabilities', qos_profile)
+        self.pub.publish(String(data=json.dumps(manifest)))
+        self.get_logger().info("Published robot capabilities manifest.")
 
 def main(args=None):
     rclpy.init(args=args)
-    node = PlannerNode()
+    node = CapabilityScannerNode()
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()
-
-if __name__ == '__main__':
-    main()
