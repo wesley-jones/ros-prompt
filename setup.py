@@ -15,7 +15,12 @@ setup(
             'launch/ros_prompt.launch.py'
         ]),
     ],
-    install_requires=['setuptools'],
+    install_requires=[
+        'setuptools',
+        'llama-cpp-python',
+        'py_tree',
+        'openai'
+    ],
     zip_safe=True,
     maintainer='wesley-jones',
     maintainer_email='wesoccer2003@yahoo.com',
@@ -27,6 +32,7 @@ setup(
             'capability_scanner_node = ros_prompt.nodes.capability_scanner_node:main',
             'intent_node = ros_prompt.nodes.intent_node:main',
             'planner_node = ros_prompt.nodes.planner_node:main',
+            'executor_node = ros_prompt.nodes.executor_node:main',
         ],
     },
 )
