@@ -8,6 +8,7 @@ from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 import os
 import importlib
 import re
+from ros_prompt.utilities.ros_type_utils import import_msg_class
 
 # Define the mapping in one place
 TYPENAME_MAP = {
@@ -45,16 +46,6 @@ ANY_SEQUENCE_REGEX = re.compile(r'^sequence<(.+)>$')
 
 def is_primitive_array(field_type):
     return re.match(PRIMITIVE_REGEX, field_type)
-
-def import_msg_class(self, msg_type_str):
-    # Accepts "geometry_msgs/msg/Vector3" or "geometry_msgs/Vector3"
-    if '/msg/' not in msg_type_str and '/' in msg_type_str:
-        pkg, msg = msg_type_str.split('/')
-        msg_type_str = f"{pkg}/msg/{msg}"
-    # self.get_logger().info(f"Importing message class for: {msg_type_str}")
-    mod_path, class_name = msg_type_str.replace('/', '.').rsplit('.', 1)
-    mod = importlib.import_module(mod_path)
-    return getattr(mod, class_name)
 
 def extract_params_from_msg(self, msg_cls, prefix=''):
     params = {}

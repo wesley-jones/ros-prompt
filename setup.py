@@ -28,7 +28,6 @@ setup(
     license='MIT',
     entry_points={
         'console_scripts': [
-            'main = ros_prompt.main:main',
             'capability_scanner_node = ros_prompt.nodes.capability_scanner_node:main',
             'intent_node = ros_prompt.nodes.intent_node:main',
             'planner_node = ros_prompt.nodes.planner_node:main',

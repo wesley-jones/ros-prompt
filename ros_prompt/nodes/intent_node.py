@@ -10,7 +10,7 @@ class IntentNode(Node):
         self.get_logger().info("Initializing IntentNode...")
         # Initialize the LLM client
         self.llm_client = LLMClient(node=self)
-        self.get_logger().info("LLMClient initialized.")
+        # self.get_logger().info("LLMClient initialized.")
         self.subscription = self.create_subscription(
             String,
             '/user_input',

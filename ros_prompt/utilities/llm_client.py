@@ -5,7 +5,7 @@ class LLMClient:
     def __init__(self, node, api_key=None):
         self.node = node
         self.logger = node.get_logger()
-        self.logger.info("Initializing LLMClient...")
+        # self.logger.info("Initializing LLMClient...")
         self.api_key = api_key
         self.model_type = "llama"  # Default model type
 
