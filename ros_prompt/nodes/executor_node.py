@@ -9,6 +9,17 @@ import threading
 from ros_prompt.utilities.generic_publisher_adapter import GenericPublisherAdapter
 from ros_prompt.utilities.generic_bt_behaviour import GenericPublisherBehaviour
 from ros_prompt.utilities.ros_type_utils import import_msg_class
+import importlib
+
+MODULE_PREFIX = "ros_prompt.adapters_py.builtins"
+
+def load_class_from_manifest_entry(manifest_entry):
+    file_name = manifest_entry['class_file']
+    class_name = manifest_entry['plugin_name']
+    module_name = f"{MODULE_PREFIX}.{file_name}"
+    module = importlib.import_module(module_name)
+    cls = getattr(module, class_name)
+    return cls
 
 def find_manifest_entry(tag, manifest_map):
     # Search topics
@@ -17,21 +28,103 @@ def find_manifest_entry(tag, manifest_map):
             return topic
     # Search builtins
     for builtin in manifest_map.get('builtins', []):
-        if builtin.get('name') == tag:
+        if builtin.get('plugin_name') == tag:
             return builtin
     return None  # Not found
 
+def str_to_type(type_str):
+    """
+    Convert a string type from the manifest to a Python type.
+    Expand as needed for your types.
+    """
+    if type_str in [float, int, str, bool]:
+        return type_str  # Already a Python type (if manifest is parsed with real types)
+    mapping = {
+        'float': float,
+        'int': int,
+        'str': str,
+        'bool': lambda x: x in [True, "true", "True", 1, "1"],
+    }
+    return mapping[type_str]
+
+def validate_and_coerce_attributes(tag, attrib, manifest_map):
+    cap = find_manifest_entry(tag, manifest_map)
+    if not cap:
+        raise ValueError(f"Capability/entry '{tag}' not found in manifest.")
+
+    param_spec = cap.get('params', {})
+    errors = []
+    coerced_params = {}
+
+    for param_name, type_decl in param_spec.items():
+        if param_name not in attrib:
+            errors.append(f"Missing required parameter '{param_name}'")
+            continue
+        value = attrib[param_name]
+        # Always extract the type string from the dict, fallback to str if needed
+        if isinstance(type_decl, dict):
+            type_str = type_decl.get("type")
+            if type_str is None:
+                errors.append(f"Parameter '{param_name}' missing type in manifest")
+                continue
+        else:
+            type_str = type_decl
+        try:
+            to_type = str_to_type(type_str)
+            coerced_value = to_type(value)
+        except Exception as e:
+            errors.append(
+                f"Parameter '{param_name}' with value '{value}' could not be coerced to {type_str}: {e}"
+            )
+            continue
+        coerced_params[param_name] = coerced_value
+
+    if errors:
+        raise ValueError(
+            f"Validation/coercion failed for capability '{tag}':\n" + "\n".join(errors)
+        )
+
+    return coerced_params
+
 
 def create_behaviour_from_xml(tag, attrib, manifest_map, ros_node):
+    try:
+        params = validate_and_coerce_attributes(tag, attrib, manifest_map)
+    except ValueError as e:
+        ros_node.get_logger().error(str(e))
+        return None
+
     cap = find_manifest_entry(tag, manifest_map)
     if not cap:
         ros_node.get_logger().error(f"Capability '{tag}' not found in manifest.")
         return None
     ros_node.get_logger().info(f"Found capability: {cap}")
-    ros_node.get_logger().info(f"Creating behaviour for capability: {cap['name']} ({cap['type']})")
-    msg_class = import_msg_class(ros_node, cap["type"])
-    adapter = GenericPublisherAdapter(ros_node, cap["name"], msg_class)
-    behaviour = GenericPublisherBehaviour(adapter, attrib, name=tag)
+
+    # Choose adapter/behaviour based on manifest info
+    interface = cap.get("interface", "topic_publisher")  # default to publisher if missing
+
+    if interface == "topic_publisher":
+        msg_class = import_msg_class(ros_node, cap["type"])
+        adapter = GenericPublisherAdapter(ros_node, cap["name"], msg_class)
+        behaviour = GenericPublisherBehaviour(adapter, params, ros_node, name=tag)
+    elif interface == "topic_subscriber":
+        behaviour = None  # Placeholder for subscriber behaviour
+        # msg_class = import_msg_class(ros_node, cap["type"])
+        # adapter = GenericSubscriberAdapter(ros_node, cap["name"], msg_class)
+        # behaviour = GenericSubscriberBehaviour(adapter, params, ros_node, name=tag)
+    elif interface == "builtin":
+        # Use plugin_name from manifest for lookup
+        #try:
+        behaviour_class = load_class_from_manifest_entry(cap)
+        #except Exception as e:
+         #   ros_node.get_logger().error(f"Failed to load builtin {cap['plugin_name']}: {e}")
+          #  return None
+        # Only pass params that the class expects (could add kwargs filtering here)
+        behaviour = behaviour_class(**params, name=tag)
+    else:
+        ros_node.get_logger().error(f"Unknown capability interface: {interface}")
+        return None
+
     return behaviour
 
 class BTExecutorNode(Node):
@@ -78,7 +171,17 @@ class BTExecutorNode(Node):
                     new_tree = self.parse_bt_xml(msg.data)
                     self.current_tree = new_tree
                     self.current_tree_xml = msg.data
-                    self.get_logger().info(py_trees.display.unicode_tree(self.current_tree))
+                    self.get_logger().info(py_trees.display.unicode_tree(self.current_tree.root))
+                    self.get_logger().info(f"Type of current_tree: {type(self.current_tree)}")
+
+
+                    # root = py_trees.composites.Sequence("RootSeq", memory=False)
+                    # node = MyBehaviour(name="TestBehaviour")
+                    # root.add_child(node)
+
+                    # tree = py_trees.trees.BehaviourTree(root)
+                    # self.current_tree = tree
+
 
                 # except Exception as e:
                     # self.get_logger().error(f"Failed to parse BT: {e}")
@@ -94,12 +197,12 @@ class BTExecutorNode(Node):
         temp_xml_str_with_wait = """<BehaviorTree ID="MainTree">
   <Sequence>
     <SetCmd_vel linear_x="0.2" linear_y="0.0" linear_z="0.0" angular_x="0.0" angular_y="0.0" angular_z="0.0"/>
-    <Wait duration="5"/>
+    <CommandHold duration="5"/>
     <SetCmd_vel linear_x="0.0" linear_y="0.0" linear_z="0.0" angular_x="0.0" angular_y="0.0" angular_z="0.0"/>
   </Sequence>
 </BehaviorTree>
 """
-        xml_str = self.clean_llm_xml(temp_xml_str)
+        xml_str = self.clean_llm_xml(temp_xml_str_with_wait)
         # Minimal example: parses <sequence> with <action> children
         self.get_logger().info("Behavior Tree XML:\n" + xml_str)
         root = ET.fromstring(xml_str)
@@ -129,7 +232,14 @@ class BTExecutorNode(Node):
             else:
                 # Leaf node: create adapter/builtin from manifest
                 # Pass 'self' as the ros_node reference
-                return create_behaviour_from_xml(tag, attrib, manifest_map, self)
+                new_behavior = create_behaviour_from_xml(tag, attrib, manifest_map, self)
+                if new_behavior is None:
+                    raise ValueError(f"Failed to create behaviour for tag '{tag}' with attributes {attrib}")
+                return py_trees.decorators.OneShot(
+                    name=f"OneShot_{new_behavior.name}",
+                    child=new_behavior,
+                    policy=py_trees.common.OneShotPolicy.ON_SUCCESSFUL_COMPLETION
+                )
 
         # If the root is <BehaviorTree>, skip to its first child
         if root.tag == "BehaviorTree":
@@ -141,14 +251,26 @@ class BTExecutorNode(Node):
         else:
             tree_root = build_tree(root)
 
-        return tree_root
+        return py_trees.trees.BehaviourTree(tree_root)
 
     def tick_loop(self):
-        rate = self.create_rate(10)  # 10 Hz
+        rate = self.create_rate(0.2)  # 0.2 Hz
         while rclpy.ok():
+            self.get_logger().info("Tick loop running...")
             with self.lock:
                 if self.current_tree:
-                    self.current_tree.tick()
+                    for node in self.current_tree.root.iterate():
+                        self.get_logger().info(f"## Before ### Node: {node.name}, Status: {node.status}")
+                    self.get_logger().info("current_tree is set, ticking...")
+                    self.get_logger().info(f"Type of current_tree: {type(self.current_tree)}")
+                    # Tick the current behavior tree
+                    status = self.current_tree.tick()
+                    for node in self.current_tree.root.iterate():
+                        self.get_logger().info(f"## After ### Node: {node.name}, Status: {node.status}")
+                    if status == py_trees.common.Status.SUCCESS:
+                        self.get_logger().info("Tree complete; clearing current_tree.")
+                        self.current_tree = None
+
             rate.sleep()
     
     import re

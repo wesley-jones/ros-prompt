@@ -145,16 +145,16 @@ def merge_manifest_with_capabilities(self, dynamic_manifest, robot_caps):
     :param robot_caps: list of dicts, each with at least 'name', 'description'
     :return: merged manifest dict with only supported topics and descriptions
     """
-    cap_map = {cap['name']: cap for cap in robot_caps}
+    topic_cap_map = {cap['name']: cap for cap in robot_caps['topics']}
     # self.get_logger().info(f"Loaded robot capabilities: {cap_map.keys()}")
     # self.get_logger().info(f"Dynamic manifest topics: {[t['name'] for t in dynamic_manifest['topics']]}")
     merged_topics = []
     for scanned_topic in dynamic_manifest['topics']:
         # self.get_logger().info(f"Processing scanned topic: {scanned_topic['name']} of type {scanned_topic['type']}")
         topic_name = scanned_topic['name']
-        if topic_name in cap_map:
+        if topic_name in topic_cap_map:
             self.get_logger().info(f"Found capability match for topic: {topic_name}")
-            cap = cap_map[topic_name]
+            cap = topic_cap_map[topic_name]
             # Check type matches, if 'type' is provided in capabilities file
             if 'type' in cap and cap['type'] != scanned_topic['type']:
                 self.get_logger().warning(f"Type mismatch for topic {topic_name}: manifest={scanned_topic['type']} vs cap={cap['type']}")
@@ -166,7 +166,12 @@ def merge_manifest_with_capabilities(self, dynamic_manifest, robot_caps):
                 if key != 'name':
                     merged_topic[key] = value
             merged_topics.append(merged_topic)
-    return {'topics': merged_topics}
+
+    # Builtins: just include them directly from robot_caps
+    merged_builtins = robot_caps.get('builtins', [])
+
+    # Return manifest with both topics and builtins
+    return {'topics': merged_topics, 'builtins': merged_builtins}
 
 def load_dynamic_manifest(self):
     manifest = {'topics': []}
@@ -212,7 +217,7 @@ class CapabilityScannerNode(Node):
         super().__init__('capability_scanner')
         self.dynamic_manifest = load_dynamic_manifest(self)
         self.robot_caps = load_robot_capabilities(self)
-        final_manifest = merge_manifest_with_capabilities(self, self.dynamic_manifest, self.robot_caps['topics'])
+        final_manifest = merge_manifest_with_capabilities(self, self.dynamic_manifest, self.robot_caps)
 
         # Publish manifest
         qos_profile = QoSProfile(

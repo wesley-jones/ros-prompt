@@ -1,8 +1,11 @@
-class GenericPublisherAdapter:
+class GenericPublisherAdapter():
     def __init__(self, node, topic_name, msg_type):
+        self.node = node
+        self.node.get_logger().info(f"Creating GenericPublisherAdapter for topic: {topic_name} with type: {msg_type}")
         self.publisher = node.create_publisher(msg_type, topic_name, 10)
 
     def execute(self, **kwargs):
+        self.node.get_logger().info(f"Publishing message to {self.publisher.topic_name} with data: {kwargs}")
         msg = self._create_msg(**kwargs)
         self.publisher.publish(msg)
 

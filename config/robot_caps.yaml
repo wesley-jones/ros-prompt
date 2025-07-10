@@ -3,9 +3,13 @@ robot_caps:
     - name: "/cmd_vel"
       type: "geometry_msgs/msg/Twist"
       plugin_name: "SetCmd_vel"
-      description: "Set robot linear and angular velocities."
+      description: "Set robot linear and angular velocities indefinitely until further notice."
+      interface: "topic_publisher"
   builtins:
-    - name: "Wait"
-      description: "Wait for a specified duration in seconds."
+    - name: "Command Hold"
+      plugin_name: "CommandHold"
+      class_file: "command_hold_adapter"
+      description: "A time period during which the robot intentionally refrains from submitting any new commands. This is typically used to prevent unintended actions, ensure safety, or allow ongoing operations to complete without interference. No new movement, navigation, or actuation instructions are sent while in this state."
       params:
-        duration: float
+        duration: "float"
+      interface: "builtin"
