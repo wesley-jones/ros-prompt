@@ -9,7 +9,7 @@ class PlannerNode(Node):
     def __init__(self):
         super().__init__('planner_node')
         self.capabilities = None
-        self.world_state = self.get_initial_world_state()  # You might want to subscribe for updates later
+        # self.world_state = self.get_initial_world_state()  # You might want to subscribe for updates later
         self.llm_client = LLMClient(node=self)
 
         qos_profile = QoSProfile(depth=1)
@@ -21,10 +21,10 @@ class PlannerNode(Node):
             self.capabilities_callback,
             qos_profile
         )
-        self.intent_sub = self.create_subscription(
+        self.subscription = self.create_subscription(
             String,
-            '/intent',
-            self.intent_callback,
+            '/user_input',
+            self.user_input_callback,
             10
         )
         self.bt_pub = self.create_publisher(
@@ -48,25 +48,32 @@ class PlannerNode(Node):
             "capabilities": ["navigate", "pickup", "speak"]
         }
 
-    def intent_callback(self, msg):
+    def user_input_callback(self, msg):
+
+        user_text = msg.data
+        self.get_logger().info(f"Received user input: {user_text}")
+
+
         if self.capabilities is None:
             self.get_logger().warn("Capabilities not yet received. Skipping planning.")
             return
-        try:
-            self.get_logger().info("Processing intent...")
-            intent = json.loads(msg.data)
-        except Exception as e:
-            self.get_logger().error(f"Intent processing error: {e}")
-            return
-
-        self.get_logger().info(f"Received intent: {intent}")
 
         try:
             bt_xml = self.llm_client.query_llm(
                 system_prompt=self.get_system_prompt(),
-                user_prompt=f"Intent: {intent}",
-                final_instructions="Respond ONLY with the XML, no extra explanation.",
-                world_state=self.world_state,
+                user_prompt=f"User Request: {user_text}",
+                final_instructions="""Here is an example:
+
+<BehaviorTree ID="MainTree">
+  <Sequence>
+    <SetCmd_vel linear_x="0.2" linear_y="0.0" linear_z="0.0" angular_x="0.0" angular_y="0.0" angular_z="0.0"/>
+    <CommandHold duration="5"/>
+    <SetCmd_vel linear_x="0.0" linear_y="0.0" linear_z="0.0" angular_x="0.0" angular_y="0.0" angular_z="0.0"/>
+  </Sequence>
+</BehaviorTree>
+
+Respond ONLY with the XML, no extra explanation.""",
+                # world_state=self.world_state,
                 max_tokens=1024,
                 temperature=0.2,
                 timeout=300
@@ -84,9 +91,11 @@ class PlannerNode(Node):
 
     def get_system_prompt(self):
         system_prompt = (
-            "Given the following robot intent, capabilities, and world state, "
+            "Given the following user request and capabilities, "
             "generate a behavior tree in BT.CPP/Nav2 XML format that the robot can execute."
             "Respond ONLY with the XML, no extra explanation."
+            " Here are the robot's capabilities:\n"
+            f"{json.dumps(self.capabilities, indent=2)}\n\n"
         )
         return system_prompt
 

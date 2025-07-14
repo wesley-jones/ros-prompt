@@ -18,8 +18,8 @@ setup(
     install_requires=[
         'setuptools',
         'llama-cpp-python',
-        'py_tree',
-        'openai'
+        'py_trees',
+        'openai',
     ],
     zip_safe=True,
     maintainer='wesley-jones',
@@ -29,7 +29,6 @@ setup(
     entry_points={
         'console_scripts': [
             'capability_scanner_node = ros_prompt.nodes.capability_scanner_node:main',
-            'intent_node = ros_prompt.nodes.intent_node:main',
             'planner_node = ros_prompt.nodes.planner_node:main',
             'executor_node = ros_prompt.nodes.executor_node:main',
         ],

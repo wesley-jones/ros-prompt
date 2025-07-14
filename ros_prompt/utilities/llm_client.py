@@ -1,4 +1,5 @@
 # llm_client.py
+import os
 import requests
 
 class LLMClient:
@@ -7,7 +8,7 @@ class LLMClient:
         self.logger = node.get_logger()
         # self.logger.info("Initializing LLMClient...")
         self.api_key = api_key
-        self.model_type = "llama"  # Default model type
+        self.model_type = "openai"  # Default model type
 
     def query_llm(self, system_prompt, user_prompt, final_instructions=None, world_state=None, max_tokens=256, temperature=0.2, timeout=20):
         self.logger.info(f"Querying LLM with system prompt: {system_prompt}, user prompt: {user_prompt}, final instructions: {final_instructions}, world state: {world_state}")
@@ -23,6 +24,29 @@ class LLMClient:
             prompt = self._build_deepseek_prompt(system_prompt, user_prompt, world_state)
             # Query the DeepSeek model
             return self._query_deepseek(prompt)
+        elif self.model_type == "openai":
+            # Build the prompt for OpenAI
+            self.logger.info("Using OpenAI model for query.")
+            return self._query_openai(system_prompt, user_prompt, final_instructions, world_state)
+
+    def _query_openai(self, system_prompt, user_prompt, final_instructions="", world_state=""):
+        from openai import OpenAI
+        import os
+
+        api_key = os.environ.get("ROS_PROMPT_OPENAI_KEY")
+        client = OpenAI(api_key=api_key)
+
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            store=True,
+            messages=self._build_deepseek_prompt(
+                system_prompt=system_prompt + final_instructions,
+                user_prompt=user_prompt,
+                world_state=world_state
+            ),
+            stream=False
+        )
+        return response.choices[0].message.content
 
     def _query_deepseek(self, prompt):
         from openai import OpenAI
@@ -40,9 +64,8 @@ class LLMClient:
             ],
             stream=False
         )
-        print(response.choices[0].message.content)
-        
-    
+        return response.choices[0].message.content
+
     def _query_llama(self, prompt, max_tokens=256, temperature=0.2, timeout=20):
         LLAMA_SERVER_URL = "http://localhost:8000/v1/completions"  # Update if different
         LLM_MODEL_NAME = "mistral"  # Change to your model's id if needed

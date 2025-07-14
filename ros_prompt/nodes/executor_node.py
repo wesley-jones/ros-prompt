@@ -202,7 +202,7 @@ class BTExecutorNode(Node):
   </Sequence>
 </BehaviorTree>
 """
-        xml_str = self.clean_llm_xml(temp_xml_str_with_wait)
+        xml_str = self.clean_llm_xml(xml_str)
         # Minimal example: parses <sequence> with <action> children
         self.get_logger().info("Behavior Tree XML:\n" + xml_str)
         root = ET.fromstring(xml_str)
