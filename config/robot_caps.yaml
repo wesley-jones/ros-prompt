@@ -1,4 +1,10 @@
 robot_caps:
+  actions:
+    - name: "/navigate_to_pose"
+      type: "nav2_msgs/action/NavigateToPose"
+      plugin_name: "NavigateToPose"
+      description: "Navigate the robot to a specified pose in the world."
+      interface: "action_client"
   topics:
     - name: "/cmd_vel"
       type: "geometry_msgs/msg/Twist"

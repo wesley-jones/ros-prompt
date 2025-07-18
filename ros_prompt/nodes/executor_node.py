@@ -6,9 +6,11 @@ import json
 import py_trees
 import xml.etree.ElementTree as ET
 import threading
-from ros_prompt.utilities.generic_publisher_adapter import GenericPublisherAdapter
-from ros_prompt.utilities.generic_bt_behaviour import GenericPublisherBehaviour
-from ros_prompt.utilities.ros_type_utils import import_msg_class
+from ros_prompt.adapters_py.generic_publisher_adapter import GenericPublisherAdapter
+from ros_prompt.behaviors_py.generic_bt_behaviour import GenericPublisherBehaviour
+from ros_prompt.utilities.ros_type_utils import import_ros_type
+from ros_prompt.adapters_py.generic_action_adapter import GenericActionAdapter
+from ros_prompt.behaviors_py.generic_action_behaviour import GenericActionBehaviour
 import importlib
 
 MODULE_PREFIX = "ros_prompt.adapters_py.builtins"
@@ -26,6 +28,10 @@ def find_manifest_entry(tag, manifest_map):
     for topic in manifest_map.get('topics', []):
         if topic.get('plugin_name') == tag or topic.get('name') == tag:
             return topic
+    # Search actions
+    for action in manifest_map.get('actions', []):
+        if action.get('plugin_name') == tag or action.get('name') == tag:
+            return action
     # Search builtins
     for builtin in manifest_map.get('builtins', []):
         if builtin.get('plugin_name') == tag:
@@ -58,7 +64,7 @@ def validate_and_coerce_attributes(tag, attrib, manifest_map):
 
     for param_name, type_decl in param_spec.items():
         if param_name not in attrib:
-            errors.append(f"Missing required parameter '{param_name}'")
+            # errors.append(f"Missing required parameter '{param_name}'")
             continue
         value = attrib[param_name]
         # Always extract the type string from the dict, fallback to str if needed
@@ -104,7 +110,7 @@ def create_behaviour_from_xml(tag, attrib, manifest_map, ros_node):
     interface = cap.get("interface", "topic_publisher")  # default to publisher if missing
 
     if interface == "topic_publisher":
-        msg_class = import_msg_class(ros_node, cap["type"])
+        msg_class = import_ros_type(ros_node, cap["type"])
         adapter = GenericPublisherAdapter(ros_node, cap["name"], msg_class)
         behaviour = GenericPublisherBehaviour(adapter, params, ros_node, name=tag)
     elif interface == "topic_subscriber":
@@ -121,6 +127,10 @@ def create_behaviour_from_xml(tag, attrib, manifest_map, ros_node):
           #  return None
         # Only pass params that the class expects (could add kwargs filtering here)
         behaviour = behaviour_class(**params, name=tag)
+    elif interface == "action_client":
+        action_class = import_ros_type(ros_node, cap["type"])  # For actions, this will be the action type (not FeedbackMessage)
+        adapter = GenericActionAdapter(ros_node, cap["name"], action_class)
+        behaviour = GenericActionBehaviour(adapter, params, ros_node, name=tag)
     else:
         ros_node.get_logger().error(f"Unknown capability interface: {interface}")
         return None

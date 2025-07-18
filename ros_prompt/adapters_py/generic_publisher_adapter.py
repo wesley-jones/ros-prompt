@@ -1,3 +1,5 @@
+from ros_prompt.utilities.ros_type_utils import set_nested_attr
+
 class GenericPublisherAdapter():
     def __init__(self, node, topic_name, msg_type):
         self.node = node
@@ -14,10 +16,5 @@ class GenericPublisherAdapter():
         # For geometry_msgs/Twist, map kwargs to .linear.x, .angular.z, etc.
         msg = self.publisher.msg_type()  # or use a helper
         for field, value in kwargs.items():
-            # Handle nested fields, e.g., 'linear_x' -> msg.linear.x
-            parts = field.split('_')
-            current = msg
-            for part in parts[:-1]:
-                current = getattr(current, part)
-            setattr(current, parts[-1], value)
+            set_nested_attr(msg, field, value)
         return msg

@@ -8,7 +8,7 @@ from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 import os
 import importlib
 import re
-from ros_prompt.utilities.ros_type_utils import import_msg_class
+from ros_prompt.utilities.ros_type_utils import import_ros_type
 
 # Define the mapping in one place
 TYPENAME_MAP = {
@@ -90,7 +90,7 @@ def extract_params_from_msg(self, msg_cls, prefix=''):
                 # It's a sequence of messages!
                 # try:
                     # self.get_logger().info(f"Importing message class for sequence element: {base_type}")
-                    nested_cls = import_msg_class(self, base_type)
+                    nested_cls = import_ros_type(self, base_type)
                     # Recursively build the params for an item, then wrap in List[...] for manifest
                     nested_params = extract_params_from_msg(self, nested_cls, prefix=f"{prefix}{field}_item_")
                     params[f"{prefix}{field}"] = {
@@ -104,7 +104,7 @@ def extract_params_from_msg(self, msg_cls, prefix=''):
         else:
             # try:
                 # Nested type, recurse
-                nested_cls = import_msg_class(self, field_type)
+                nested_cls = import_ros_type(self, field_type)
                 params.update(extract_params_from_msg(self, nested_cls, prefix=f"{prefix}{field}_"))
             # except Exception as e:
             #     self.get_logger().info(f"Skipping field {field} ({field_type}): {e}")
@@ -140,48 +140,57 @@ def load_robot_capabilities(self):
 
 def merge_manifest_with_capabilities(self, dynamic_manifest, robot_caps):
     """
-    Keeps only topics present in robot_caps, adds descriptions, and merges any extra metadata.
-    :param dynamic_manifest: dict with 'topics' from scan
-    :param robot_caps: list of dicts, each with at least 'name', 'description'
-    :return: merged manifest dict with only supported topics and descriptions
+    Merges actions and topics present in robot_caps, adds descriptions, and merges any extra metadata.
+    :param dynamic_manifest: dict with 'topics' and 'actions'
+    :param robot_caps: dict with 'topics', 'actions', and 'builtins'
+    :return: merged manifest dict
     """
-    topic_cap_map = {cap['name']: cap for cap in robot_caps['topics']}
-    # self.get_logger().info(f"Loaded robot capabilities: {cap_map.keys()}")
-    # self.get_logger().info(f"Dynamic manifest topics: {[t['name'] for t in dynamic_manifest['topics']]}")
-    merged_topics = []
-    for scanned_topic in dynamic_manifest['topics']:
-        # self.get_logger().info(f"Processing scanned topic: {scanned_topic['name']} of type {scanned_topic['type']}")
-        topic_name = scanned_topic['name']
-        if topic_name in topic_cap_map:
-            self.get_logger().info(f"Found capability match for topic: {topic_name}")
-            cap = topic_cap_map[topic_name]
-            # Check type matches, if 'type' is provided in capabilities file
-            if 'type' in cap and cap['type'] != scanned_topic['type']:
-                self.get_logger().warning(f"Type mismatch for topic {topic_name}: manifest={scanned_topic['type']} vs cap={cap['type']}")
-                # Optionally skip or raise:
-                continue  # or: raise ValueError(...)
-            merged_topic = scanned_topic.copy()
-            # Add/overwrite extra fields from capability definition (description, etc)
-            for key, value in cap.items():
-                if key != 'name':
-                    merged_topic[key] = value
-            merged_topics.append(merged_topic)
+    def merge_section(dynamic_section, caps_section, section_name):
+        cap_map = {cap['name']: cap for cap in caps_section}
+        merged = []
+        for scanned in dynamic_section:
+            name = scanned['name']
+            if name in cap_map:
+                self.get_logger().info(f"Found capability match for {section_name}: {name}")
+                cap = cap_map[name]
+                if 'type' in cap and cap['type'] != scanned['type']:
+                    self.get_logger().warning(
+                        f"Type mismatch for {section_name} {name}: manifest={scanned['type']} vs cap={cap['type']}")
+                    continue
+                merged_item = scanned.copy()
+                for key, value in cap.items():
+                    if key != 'name':
+                        merged_item[key] = value
+                merged.append(merged_item)
+        return merged
 
-    # Builtins: just include them directly from robot_caps
+    merged_topics = merge_section(dynamic_manifest.get('topics', []), robot_caps.get('topics', []), 'topic')
+    merged_actions = merge_section(dynamic_manifest.get('actions', []), robot_caps.get('actions', []), 'action')
     merged_builtins = robot_caps.get('builtins', [])
 
-    # Return manifest with both topics and builtins
-    return {'topics': merged_topics, 'builtins': merged_builtins}
+    return {'topics': merged_topics, 'actions': merged_actions, 'builtins': merged_builtins}
+
 
 def load_dynamic_manifest(self):
-    manifest = {'topics': []}
+    manifest = {'topics': [], 'actions': []}
+
+    # --- 1. Scan topics ---
     topic_types = self.get_topic_names_and_types()
     for topic_name, type_list in topic_types:
         # self.get_logger().info(f"Discovered topic: {topic_name} with types: {type_list}")
         # Some topics might have multiple types; pick the first
         msg_type_str = type_list[0]
+
+        # Skip internal action message types
+        if (
+            msg_type_str.endswith('FeedbackMessage') or
+            msg_type_str.endswith('Result') or
+            msg_type_str.endswith('Goal')
+        ):
+            continue
+
         try:
-            msg_cls = import_msg_class(self, msg_type_str)
+            msg_cls = import_ros_type(self, msg_type_str)
         except Exception as e:
             self.get_logger().error(f"Failed to import message class for {msg_type_str}: {e}")
             continue
@@ -193,7 +202,25 @@ def load_dynamic_manifest(self):
             'params': params,
         }
         manifest['topics'].append(entry)
-    # self.get_logger().info(f"Discovered topics: {manifest['topics']}")
+
+    # --- 2. Scan actions ---
+    action_map = discover_actions(self)  # { '/navigate_to_pose': 'nav2_msgs/action/NavigateToPose' }
+    for action_name, action_type in action_map.items():
+        try:
+            action_cls = import_ros_type(self, action_type)
+        except Exception as e:
+            self.get_logger().error(f"Failed to import action class for {action_type}: {e}")
+            continue
+        params = extract_params_from_msg(self, action_cls.Goal)  # Use the Goal submessage for params
+        entry = {
+            'name': action_name,
+            'type': action_type,
+            'plugin_name': f"{action_type.split('/')[-1]}",
+            'params': params,
+            'interface': 'action_client',
+        }
+        manifest['actions'].append(entry)
+
     return manifest
 
 
@@ -202,14 +229,17 @@ def discover_actions(node):
     service_types = dict(node.get_service_names_and_types())
     actions = {}
     for service, types in service_types.items():
+        # ROS2 actions have a service named `/my_action/_action/send_goal`
         if service.endswith('/_action/send_goal'):
-            action_base = service[:-len('/_action/send_goal')]
+            action_base = service[:-len('/_action/send_goal')]  # e.g. /navigate_to_pose
+            # Try to extract the real action type (e.g., nav2_msgs/action/NavigateToPose)
+            # The type looks like 'nav2_msgs/action/NavigateToPose_SendGoal'
             action_type = types[0]
-            # Optionally clean up the type (strip _SendGoal)
             if action_type.endswith('_SendGoal'):
                 action_type = action_type[:-len('_SendGoal')]
             actions[action_base] = action_type
     return actions
+
 
 class CapabilityScannerNode(Node):
 
