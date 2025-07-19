@@ -11,7 +11,7 @@ class LLMClient:
         self.model_type = "openai"  # Default model type
 
     def query_llm(self, system_prompt, user_prompt, final_instructions=None, world_state=None, max_tokens=256, temperature=0.2, timeout=20):
-        self.logger.info(f"Querying LLM with system prompt: {system_prompt}, user prompt: {user_prompt}, final instructions: {final_instructions}, world state: {world_state}")
+        # self.logger.info(f"Querying LLM with system prompt: {system_prompt}, user prompt: {user_prompt}, final instructions: {final_instructions}, world state: {world_state}")
         if self.model_type == "llama":
             self.logger.info("Using Llama model for query.")
             # Build the prompt for Llama

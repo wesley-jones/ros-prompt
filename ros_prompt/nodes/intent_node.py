@@ -39,7 +39,7 @@ class IntentNode(Node):
             system_prompt=self.get_system_prompt(),
             final_instructions=self.get_final_instructions(),
             user_prompt=f"User: {user_text}",
-            world_state=self.get_world_state()
+            # world_state=self.get_world_state()
         )
         self.get_logger().info(f"LLM response: {intent}")
         if intent:

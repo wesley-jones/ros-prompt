@@ -173,28 +173,15 @@ class BTExecutorNode(Node):
             self.get_logger().error(f"Error parsing capabilities: {e}")
 
     def bt_callback(self, msg):
+        self.get_logger().info(f"Received BT XML: {msg.data[:100]}...")  # Log first 100 chars for brevity
         # Parse and load the new BT if XML changed
         with self.lock:
             if msg.data != self.current_tree_xml:
-                # try:
-                    self.get_logger().info("Received new behavior tree XML.")
-                    new_tree = self.parse_bt_xml(msg.data)
-                    self.current_tree = new_tree
-                    self.current_tree_xml = msg.data
-                    self.get_logger().info(py_trees.display.unicode_tree(self.current_tree.root))
-                    self.get_logger().info(f"Type of current_tree: {type(self.current_tree)}")
-
-
-                    # root = py_trees.composites.Sequence("RootSeq", memory=False)
-                    # node = MyBehaviour(name="TestBehaviour")
-                    # root.add_child(node)
-
-                    # tree = py_trees.trees.BehaviourTree(root)
-                    # self.current_tree = tree
-
-
-                # except Exception as e:
-                    # self.get_logger().error(f"Failed to parse BT: {e}")
+                self.get_logger().info("Received new behavior tree XML.")
+                new_tree = self.parse_bt_xml(msg.data)
+                self.current_tree = new_tree
+                self.current_tree_xml = msg.data
+                self.get_logger().info(py_trees.display.unicode_tree(self.current_tree.root))
 
     def parse_bt_xml(self, xml_str):
         temp_xml_str = """<BehaviorTree ID="MainTree">
@@ -213,8 +200,6 @@ class BTExecutorNode(Node):
 </BehaviorTree>
 """
         xml_str = self.clean_llm_xml(xml_str)
-        # Minimal example: parses <sequence> with <action> children
-        self.get_logger().info("Behavior Tree XML:\n" + xml_str)
         root = ET.fromstring(xml_str)
 
         manifest_map = self.capabilities
@@ -271,15 +256,15 @@ class BTExecutorNode(Node):
                 if self.current_tree:
                     for node in self.current_tree.root.iterate():
                         self.get_logger().info(f"## Before ### Node: {node.name}, Status: {node.status}")
-                    self.get_logger().info("current_tree is set, ticking...")
-                    self.get_logger().info(f"Type of current_tree: {type(self.current_tree)}")
-                    # Tick the current behavior tree
-                    status = self.current_tree.tick()
+                    self.current_tree.tick()
+                    status = self.current_tree.root.status
+                    self.get_logger().info(f"Tick returned status: {status}")
                     for node in self.current_tree.root.iterate():
                         self.get_logger().info(f"## After ### Node: {node.name}, Status: {node.status}")
-                    if status == py_trees.common.Status.SUCCESS:
+                    if status in [py_trees.common.Status.SUCCESS, py_trees.common.Status.FAILURE]:
                         self.get_logger().info("Tree complete; clearing current_tree.")
                         self.current_tree = None
+                        self.current_tree_xml = None
 
             rate.sleep()
     
@@ -298,15 +283,6 @@ class BTExecutorNode(Node):
         xml = xml.strip()
         return xml
 
-
-# Example action for testing
-class SayAction(py_trees.behaviour.Behaviour):
-    def __init__(self, name):
-        super().__init__(name)
-
-    def update(self):
-        print(f"[ACTION] Executing {self.name}")
-        return py_trees.common.Status.SUCCESS
 
 def main(args=None):
     rclpy.init(args=args)

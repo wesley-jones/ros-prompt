@@ -27,7 +27,7 @@ class GenericActionAdapter:
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.status = "rejected"
-            self.node.get_logger().info("Goal rejected")
+            self.node.get_logger().error("Goal was rejected by the action server.")
             return
         self.goal_handle = goal_handle
         self.result_future = goal_handle.get_result_async()
@@ -45,3 +45,9 @@ class GenericActionAdapter:
 
     def get_result(self):
         return self.result
+
+    def cancel_goal(self):
+        if self.goal_handle and self.status in ["active", "pending"]:
+            future = self.goal_handle.cancel_goal_async()
+            future.add_done_callback(lambda f: self.node.get_logger().info("Goal cancelled"))
+        self.status = "cancelled"
