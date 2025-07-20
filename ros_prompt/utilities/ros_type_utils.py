@@ -16,13 +16,34 @@ def import_ros_type(self, msg_type_str):
     mod = importlib.import_module(module_name)
     return getattr(mod, class_name)
 
-def set_nested_attr(obj, attr_path, value):
+def set_nested_attr(msg, attr_path, value):
     """
-    Sets a (possibly nested) attribute of a ROS message object.
-    E.g., set_nested_attr(msg, "pose_pose_position_x", 1.0) sets msg.pose.pose.position.x = 1.0
+    Works for flattened paths like
+        pose_header_frame_id
+    even when the last attribute itself contains an underscore
+    (frame_id, stamp_sec, orientation_w, etc.).
+
+    Greedy algorithm, but stops at the *parent* of the final field so
+    we can call setattr once.
     """
-    parts = attr_path.split('_')
-    current = obj
-    for part in parts[:-1]:
-        current = getattr(current, part)
-    setattr(current, parts[-1], value)
+    parts   = attr_path.split('_')
+    current = msg
+
+    while parts:
+        # find the longest prefix that is an attribute of 'current'
+        for i in range(len(parts), 0, -1):
+            candidate = '_'.join(parts[:i])
+            if hasattr(current, candidate):
+                # Is this the *final* attribute?
+                if len(parts) == i:
+                    setattr(current, candidate, value)
+                    return
+                # Otherwise, descend and continue
+                current = getattr(current, candidate)
+                parts   = parts[i:]
+                break
+        else:
+            raise AttributeError(
+                f"Cannot resolve '{attr_path}': "
+                f"no attribute '{'_'.join(parts)}' on {type(current).__name__}"
+            )

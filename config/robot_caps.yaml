@@ -5,6 +5,10 @@ robot_caps:
       plugin_name: "NavigateToPose"
       description: "Navigate the robot to a specified pose in the world."
       interface: "action_client"
+      params:
+        pose_header_frame_id:
+          type: "str"
+          value: "map"
   topics:
     - name: "/cmd_vel"
       type: "geometry_msgs/msg/Twist"

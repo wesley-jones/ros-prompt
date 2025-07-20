@@ -54,43 +54,80 @@ def str_to_type(type_str):
     return mapping[type_str]
 
 def validate_and_coerce_attributes(tag, attrib, manifest_map):
+    """
+    Build the final {param_name: coerced_value} dict for this capability.
+
+    Precedence (highest first):
+        1. param_spec['value']        -> *hard constant* (overrides runtime)
+        2. runtime XML attribute      -> user/operator override
+        3. param_spec['default']      -> fallback
+        (skip param if none of the above provides a value)
+
+    If XML supplies a value that conflicts with a fixed constant
+    (i.e. a 'value' entry in YAML), we keep the constant and log a warning.
+    """
     cap = find_manifest_entry(tag, manifest_map)
     if not cap:
         raise ValueError(f"Capability/entry '{tag}' not found in manifest.")
 
     param_spec = cap.get('params', {})
-    errors = []
+    errors         = []
     coerced_params = {}
 
-    for param_name, type_decl in param_spec.items():
-        if param_name not in attrib:
-            # errors.append(f"Missing required parameter '{param_name}'")
-            continue
-        value = attrib[param_name]
-        # Always extract the type string from the dict, fallback to str if needed
-        if isinstance(type_decl, dict):
-            type_str = type_decl.get("type")
+    for param_name, spec in param_spec.items():
+
+        # --- 1. Figure out declared type ------------------------------------
+        if isinstance(spec, dict):
+            type_str = spec.get("type")
             if type_str is None:
                 errors.append(f"Parameter '{param_name}' missing type in manifest")
                 continue
+        else:  # simple string like "float"
+            type_str = spec
+
+        # --- 2. Decide which raw value to use (precedence rules) ------------
+        raw_value         = None
+        runtime_provided  = param_name in attrib
+        has_constant      = isinstance(spec, dict) and 'value' in spec
+        has_default       = isinstance(spec, dict) and 'default' in spec
+
+        if has_constant:
+            raw_value = spec['value']
+            if runtime_provided and attrib[param_name] != raw_value:
+                # Warn but keep the constant
+                print(  # or ros_node.get_logger().warn(...)
+                    f"[{tag}] runtime attempted to override constant '{param_name}'. "
+                    f"Ignoring runtime value '{attrib[param_name]}' and keeping '{raw_value}'."
+                )
+        elif runtime_provided:
+            raw_value = attrib[param_name]
+        elif has_default:
+            raw_value = spec['default']
         else:
-            type_str = type_decl
+            # nothing to coerce for this param
+            continue
+
+        # --- 3. Coerce ------------------------------------------------------
         try:
-            to_type = str_to_type(type_str)
-            coerced_value = to_type(value)
+            to_type        = str_to_type(type_str)
+            coerced_value  = to_type(raw_value)
         except Exception as e:
             errors.append(
-                f"Parameter '{param_name}' with value '{value}' could not be coerced to {type_str}: {e}"
+                f"Parameter '{param_name}' with value '{raw_value}' "
+                f"could not be coerced to {type_str}: {e}"
             )
             continue
+
         coerced_params[param_name] = coerced_value
 
+    # --- 4. Final validation -----------------------------------------------
     if errors:
         raise ValueError(
             f"Validation/coercion failed for capability '{tag}':\n" + "\n".join(errors)
         )
 
     return coerced_params
+
 
 
 def create_behaviour_from_xml(tag, attrib, manifest_map, ros_node):
@@ -184,21 +221,6 @@ class BTExecutorNode(Node):
                 self.get_logger().info(py_trees.display.unicode_tree(self.current_tree.root))
 
     def parse_bt_xml(self, xml_str):
-        temp_xml_str = """<BehaviorTree ID="MainTree">
-  <Sequence>
-    <SetCmd_vel linear_x="0.2" linear_y="0.0" linear_z="0.0" angular_x="0.0" angular_y="0.0" angular_z="0.0"/>
-    <SetCmd_vel linear_x="0.0" linear_y="0.0" linear_z="0.0" angular_x="0.0" angular_y="0.0" angular_z="0.0"/>
-  </Sequence>
-</BehaviorTree>
-"""
-        temp_xml_str_with_wait = """<BehaviorTree ID="MainTree">
-  <Sequence>
-    <SetCmd_vel linear_x="0.2" linear_y="0.0" linear_z="0.0" angular_x="0.0" angular_y="0.0" angular_z="0.0"/>
-    <CommandHold duration="5"/>
-    <SetCmd_vel linear_x="0.0" linear_y="0.0" linear_z="0.0" angular_x="0.0" angular_y="0.0" angular_z="0.0"/>
-  </Sequence>
-</BehaviorTree>
-"""
         xml_str = self.clean_llm_xml(xml_str)
         root = ET.fromstring(xml_str)
 

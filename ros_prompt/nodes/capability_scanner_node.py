@@ -43,6 +43,15 @@ SEQUENCE_REGEX = re.compile(rf'^sequence<({PRIMITIVE_TYPES_REGEX})>$')
 # Matches sequence<TYPE>, captures TYPE
 ANY_SEQUENCE_REGEX = re.compile(r'^sequence<(.+)>$')
 
+def merge_params(dynamic_params: dict, caps_params: dict) -> dict:
+    """
+    For each parameter key found in robot_caps, replace the whole
+    definition (type/size/value/whatever).  Keep everything else
+    from the dynamic scan unchanged.
+    """
+    merged = dynamic_params.copy()
+    merged.update(caps_params)          # caps wins on key conflicts
+    return merged
 
 def is_primitive_array(field_type):
     return re.match(PRIMITIVE_REGEX, field_type)
@@ -146,22 +155,36 @@ def merge_manifest_with_capabilities(self, dynamic_manifest, robot_caps):
     :return: merged manifest dict
     """
     def merge_section(dynamic_section, caps_section, section_name):
-        cap_map = {cap['name']: cap for cap in caps_section}
+        """
+        Keep ONLY the capabilities that are listed in robot_caps.yaml.
+        Within each one, merge params with robot_caps taking precedence.
+        """
+        dyn_map = {d['name']: d for d in dynamic_section}
+
         merged = []
-        for scanned in dynamic_section:
-            name = scanned['name']
-            if name in cap_map:
-                self.get_logger().info(f"Found capability match for {section_name}: {name}")
-                cap = cap_map[name]
-                if 'type' in cap and cap['type'] != scanned['type']:
-                    self.get_logger().warning(
-                        f"Type mismatch for {section_name} {name}: manifest={scanned['type']} vs cap={cap['type']}")
-                    continue
-                merged_item = scanned.copy()
-                for key, value in cap.items():
-                    if key != 'name':
-                        merged_item[key] = value
-                merged.append(merged_item)
+        for cap in caps_section:
+            name = cap['name']
+
+            # Filter – skip if the capability wasn’t discovered at runtime
+            if name not in dyn_map:
+                self.get_logger().info(
+                    f"Skipping {section_name} '{name}' — in robot_caps.yaml "
+                    f"but not found by scanner.")
+                continue
+
+            scanned = dyn_map[name]
+
+            # Start with scanned, then overlay robot_caps
+            merged_item = scanned.copy()
+            for key, value in cap.items():
+                if key == 'params' and isinstance(value, dict):
+                    dyn_params = scanned.get('params', {})
+                    merged_item['params'] = merge_params(dyn_params, value)
+                elif key != 'name':
+                    merged_item[key] = value
+
+            merged.append(merged_item)
+
         return merged
 
     merged_topics = merge_section(dynamic_manifest.get('topics', []), robot_caps.get('topics', []), 'topic')
