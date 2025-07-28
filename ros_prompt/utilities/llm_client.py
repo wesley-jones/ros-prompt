@@ -1,6 +1,10 @@
 # llm_client.py
+from curses import wrapper
 import os
 import requests
+from langchain_openai import ChatOpenAI
+from ros_prompt.utilities.bt_schema import BehaviorTree
+from ros_prompt.utilities.json_schema_tools import inline_refs
 
 class LLMClient:
     def __init__(self, node, api_key=None):
@@ -8,7 +12,135 @@ class LLMClient:
         self.logger = node.get_logger()
         # self.logger.info("Initializing LLMClient...")
         self.api_key = api_key
-        self.model_type = "openai"  # Default model type
+        self.model_type = "langchain"  # Default model type
+        self.api_key = os.getenv("ROS_PROMPT_OPENAI_KEY")
+        if not self.api_key:
+            raise RuntimeError("Env var ROS_PROMPT_OPENAI_KEY is not set")
+        
+
+    def query_langchain(self, user_prompt: str, manifest: dict, world_context: str = ""):
+
+        behavior_tree_schema = {
+            "title": "BehaviorTree",
+            "description": (
+                "A behavior tree for a robot. The root and all composite nodes must be a Sequence or Selector with a children array. "
+                "Action nodes must set type='Action', include a name (either 'cmd_vel' or 'navigate_to_pose'), "
+                "and must not have children (use an empty array for children in actions for schema compatibility)."
+            ),
+            "type": "object",
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "description": "The node type (Sequence, Selector, or Action)."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "The name of the action (for type Action)."
+                },
+                "parameters": {
+                    "type": "object",
+                    "description": "Parameters for the action node.",
+                    "additionalProperties": False     # <-- REQUIRED!
+                },
+                "children": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/BTNode"},
+                    "description": "Child nodes of this node."
+                }
+            },
+            "required": ["type", "children", "name"],
+            "additionalProperties": False,
+            "$defs": {
+                "BTNode": {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string"},
+                        "name": {"type": "string"},
+                        "parameters": {
+                            "type": "object",
+                            "additionalProperties": False   # <-- REQUIRED!
+                        },
+                        "children": {
+                            "type": "array",
+                            "items": {"$ref": "#/$defs/BTNode"}
+                        }
+                    },
+                    "required": ["type", "children", "name"],
+                    "additionalProperties": False
+                }
+            }
+        }
+
+        pydantic_schema = BehaviorTree.openai_schema()
+        self.logger.info(f"Using BehaviorTree schema: {pydantic_schema}")
+
+
+
+        llm = ChatOpenAI(model="gpt-4.1", temperature=0, api_key=self.api_key)
+
+        # 5. Pass the **dict** to with_structured_output
+        structured_llm = llm.with_structured_output(
+            schema=pydantic_schema,         # <-- dict, NOT BaseModel
+            strict=True,
+            method="function_calling"
+        )
+        prompt = """
+Generate a behavior tree as a JSON object that matches the provided schema. The root node should be a Sequence. Use these node types: Sequence, Selector, and Action. Each node must have a "type" field. "children" is an array of child nodes. Actions are leaf nodes and do not have children.
+
+Task: {user_prompt}
+"""
+        result = structured_llm.invoke(prompt)
+        self.logger.info(f"LLM response: {result}")
+        return result
+
+        # 3. Automatic retry on parse failure
+        # parser = RetryOutputParser(parser=structured_llm.output_parser, llm=llm, max_retries=1)
+
+        # 4. Prompt template
+#         prompt_1 = PromptTemplate.from_template("""
+# You are ROS Prompt's planner. Return ONE behaviour tree JSON
+# that starts with:
+# {{
+#   ""type"": "Sequence",
+#   "children": [ … ]
+# }}
+# Valid node types inside children are:
+# • Sequence          - ordered steps
+# • Selector          - try children until one succeeds
+# • Timeout {{seconds}} - limit a single child's runtime
+# • Repeater {{count}}  - run a single child N times
+# • Each capability leaf from the manifest with its own parameters
+# No other keys are allowed.
+# User request: {user_prompt}
+# """)
+
+        # 5. Load an example tree (optional)
+        # example_bt = {
+        #     "type": "Sequence",
+        #     "children": [
+        #         {
+        #             "type": "NavigateToPose",
+        #             "x": 0.6,
+        #             "y": 1.5,
+        #             "yaw": 0.1
+        #         }
+        #     ]
+        # }
+        # reply = (prompt | structured_llm).invoke({
+        #     "user_prompt": user_prompt,
+        #     # "schema": json.dumps(inline_schema)     <-- REMOVE
+        #     # "example": example_bt                  <-- keep if desired
+        # })
+        # reply = chain.invoke({
+        #     "user_prompt":   user_prompt,
+        #     "world_context": world_context,
+        #     "schema":        json.dumps(inline_schema, indent=2),   # ← here
+        #     "example":       example_bt,
+        # })
+        # self.logger.info(json.dumps(inline_schema, indent=2))
+        # reply = None
+
+        # return reply
 
     def query_llm(self, system_prompt, user_prompt, final_instructions=None, world_state=None, max_tokens=256, temperature=0.2, timeout=20):
         # self.logger.info(f"Querying LLM with system prompt: {system_prompt}, user prompt: {user_prompt}, final instructions: {final_instructions}, world state: {world_state}")

@@ -9,34 +9,10 @@ import threading
 from ros_prompt.adapters_py.generic_publisher_adapter import GenericPublisherAdapter
 from ros_prompt.behaviors_py.generic_bt_behaviour import GenericPublisherBehaviour
 from ros_prompt.utilities.ros_type_utils import import_ros_type
+from ros_prompt.utilities.bt_builder import build_py_tree
 from ros_prompt.adapters_py.generic_action_adapter import GenericActionAdapter
 from ros_prompt.behaviors_py.generic_action_behaviour import GenericActionBehaviour
-import importlib
-
-MODULE_PREFIX = "ros_prompt.adapters_py.builtins"
-
-def load_class_from_manifest_entry(manifest_entry):
-    file_name = manifest_entry['class_file']
-    class_name = manifest_entry['plugin_name']
-    module_name = f"{MODULE_PREFIX}.{file_name}"
-    module = importlib.import_module(module_name)
-    cls = getattr(module, class_name)
-    return cls
-
-def find_manifest_entry(tag, manifest_map):
-    # Search topics
-    for topic in manifest_map.get('topics', []):
-        if topic.get('plugin_name') == tag or topic.get('name') == tag:
-            return topic
-    # Search actions
-    for action in manifest_map.get('actions', []):
-        if action.get('plugin_name') == tag or action.get('name') == tag:
-            return action
-    # Search builtins
-    for builtin in manifest_map.get('builtins', []):
-        if builtin.get('plugin_name') == tag:
-            return builtin
-    return None  # Not found
+from ros_prompt.utilities.bt_schema import BehaviorTree
 
 def str_to_type(type_str):
     """
@@ -52,83 +28,6 @@ def str_to_type(type_str):
         'bool': lambda x: x in [True, "true", "True", 1, "1"],
     }
     return mapping[type_str]
-
-def validate_and_coerce_attributes(tag, attrib, manifest_map):
-    """
-    Build the final {param_name: coerced_value} dict for this capability.
-
-    Precedence (highest first):
-        1. param_spec['value']        -> *hard constant* (overrides runtime)
-        2. runtime XML attribute      -> user/operator override
-        3. param_spec['default']      -> fallback
-        (skip param if none of the above provides a value)
-
-    If XML supplies a value that conflicts with a fixed constant
-    (i.e. a 'value' entry in YAML), we keep the constant and log a warning.
-    """
-    cap = find_manifest_entry(tag, manifest_map)
-    if not cap:
-        raise ValueError(f"Capability/entry '{tag}' not found in manifest.")
-
-    param_spec = cap.get('params', {})
-    errors         = []
-    coerced_params = {}
-
-    for param_name, spec in param_spec.items():
-
-        # --- 1. Figure out declared type ------------------------------------
-        if isinstance(spec, dict):
-            type_str = spec.get("type")
-            if type_str is None:
-                errors.append(f"Parameter '{param_name}' missing type in manifest")
-                continue
-        else:  # simple string like "float"
-            type_str = spec
-
-        # --- 2. Decide which raw value to use (precedence rules) ------------
-        raw_value         = None
-        runtime_provided  = param_name in attrib
-        has_constant      = isinstance(spec, dict) and 'value' in spec
-        has_default       = isinstance(spec, dict) and 'default' in spec
-
-        if has_constant:
-            raw_value = spec['value']
-            if runtime_provided and attrib[param_name] != raw_value:
-                # Warn but keep the constant
-                print(  # or ros_node.get_logger().warn(...)
-                    f"[{tag}] runtime attempted to override constant '{param_name}'. "
-                    f"Ignoring runtime value '{attrib[param_name]}' and keeping '{raw_value}'."
-                )
-        elif runtime_provided:
-            raw_value = attrib[param_name]
-        elif has_default:
-            raw_value = spec['default']
-        else:
-            # nothing to coerce for this param
-            continue
-
-        # --- 3. Coerce ------------------------------------------------------
-        try:
-            to_type        = str_to_type(type_str)
-            coerced_value  = to_type(raw_value)
-        except Exception as e:
-            errors.append(
-                f"Parameter '{param_name}' with value '{raw_value}' "
-                f"could not be coerced to {type_str}: {e}"
-            )
-            continue
-
-        coerced_params[param_name] = coerced_value
-
-    # --- 4. Final validation -----------------------------------------------
-    if errors:
-        raise ValueError(
-            f"Validation/coercion failed for capability '{tag}':\n" + "\n".join(errors)
-        )
-
-    return coerced_params
-
-
 
 def create_behaviour_from_xml(tag, attrib, manifest_map, ros_node):
     try:
@@ -178,6 +77,7 @@ class BTExecutorNode(Node):
     def __init__(self):
         super().__init__('bt_executor_node')
         self.capabilities = None
+        self.bt_schema = None
         qos_profile = QoSProfile(depth=1)
         qos_profile.durability = DurabilityPolicy.TRANSIENT_LOCAL
 
@@ -189,7 +89,7 @@ class BTExecutorNode(Node):
         )
 
         self.current_tree = None
-        self.current_tree_xml = None
+        self.current_tree_json = None
         self.lock = threading.Lock()
         self.create_subscription(
             String,
@@ -205,70 +105,42 @@ class BTExecutorNode(Node):
     def capabilities_callback(self, msg):
         try:
             self.capabilities = json.loads(msg.data)
-            self.get_logger().info(f"Received capabilities: {self.capabilities}")
+            self.get_logger().info(f"Received capabilities: {self.capabilities}")            
         except Exception as e:
             self.get_logger().error(f"Error parsing capabilities: {e}")
+        self.bt_schema = BehaviorTree.openai_schema()
 
     def bt_callback(self, msg):
-        self.get_logger().info(f"Received BT XML: {msg.data[:100]}...")  # Log first 100 chars for brevity
-        # Parse and load the new BT if XML changed
+        self.get_logger().info(f"Received BT json: {msg.data[:100]}...")  # Log first 100 chars for brevity
+        # Parse and load the new BT if JSON changed
         with self.lock:
-            if msg.data != self.current_tree_xml:
-                self.get_logger().info("Received new behavior tree XML.")
-                new_tree = self.parse_bt_xml(msg.data)
+            if msg.data != self.current_tree_json:
+                self.get_logger().info("Received new behavior tree json.")
+                my_dict = json.loads(msg.data)
+                new_tree = self.parse_bt_json(my_dict)
+                # new_tree = self.parse_bt_json(msg.data)
                 self.current_tree = new_tree
-                self.current_tree_xml = msg.data
+                self.current_tree_json = msg.data
                 self.get_logger().info(py_trees.display.unicode_tree(self.current_tree.root))
 
-    def parse_bt_xml(self, xml_str):
-        xml_str = self.clean_llm_xml(xml_str)
-        root = ET.fromstring(xml_str)
+    def parse_bt_json(self, json_str):
 
-        manifest_map = self.capabilities
+        bt_root = llm_bt_to_pytrees(json_str)
 
-        def build_tree(xml_node):
-            tag = xml_node.tag
-            attrib = xml_node.attrib
+        # try:
+        #     bt_pydantic_obj = self.bt_schema.model_validate_json(json_str)
+        # except Exception as e:
+        #     self.get_logger().error(f"Failed to validate BT JSON: {e}")
+        #     return
+        # bt_root = build_py_tree(
+        #     node = bt_pydantic_obj,
+        #     manifest_map=self.capabilities,
+        #     ros_node=self
+        # )
+        self.tree = py_trees.trees.BehaviourTree(bt_root)
 
-            # Handle composites (Sequence, Selector, etc.)
-            if tag in ["Sequence", "Fallback", "Selector", "Parallel"]:
-                # Map tag to the correct py_trees composite
-                if tag == "Sequence":
-                    behaviour = py_trees.composites.Sequence(name=attrib.get("name", "Sequence"), memory=False)
-                elif tag in ["Selector", "Fallback"]:
-                    behaviour = py_trees.composites.Selector(name=attrib.get("name", tag))
-                elif tag == "Parallel":
-                    behaviour = py_trees.composites.Parallel(name=attrib.get("name", "Parallel"))
-                else:
-                    raise ValueError(f"Unknown composite type: {tag}")
-
-                for child_xml in xml_node:
-                    child_behaviour = build_tree(child_xml)
-                    behaviour.add_child(child_behaviour)
-                return behaviour
-            else:
-                # Leaf node: create adapter/builtin from manifest
-                # Pass 'self' as the ros_node reference
-                new_behavior = create_behaviour_from_xml(tag, attrib, manifest_map, self)
-                if new_behavior is None:
-                    raise ValueError(f"Failed to create behaviour for tag '{tag}' with attributes {attrib}")
-                return py_trees.decorators.OneShot(
-                    name=f"OneShot_{new_behavior.name}",
-                    child=new_behavior,
-                    policy=py_trees.common.OneShotPolicy.ON_SUCCESSFUL_COMPLETION
-                )
-
-        # If the root is <BehaviorTree>, skip to its first child
-        if root.tag == "BehaviorTree":
-            # Typically, BT XML wraps everything in a <BehaviorTree> root
-            if len(root) == 0:
-                raise ValueError("No child node found under <BehaviorTree>")
-            # The actual tree root is the first child (e.g., <Sequence>)
-            tree_root = build_tree(root[0])
-        else:
-            tree_root = build_tree(root)
-
-        return py_trees.trees.BehaviourTree(tree_root)
+        # Convert JSON to py_trees structure
+        return self.tree
 
     def tick_loop(self):
         rate = self.create_rate(0.2)  # 0.2 Hz
@@ -289,22 +161,21 @@ class BTExecutorNode(Node):
                         self.current_tree_xml = None
 
             rate.sleep()
-    
-    import re
 
-    def clean_llm_xml(self, raw_llm_output):
-        import re
-        # Step 1: Remove markdown fencing
-        xml = re.sub(r'^```xml\n?', '', raw_llm_output)   # Remove opening fence
-        xml = re.sub(r'\n?```$', '', xml)                # Remove closing fence
-
-        # Step 2: Unescape if it's JSON-encoded
-        xml = xml.encode('utf-8').decode('unicode_escape')
-
-        # Step 3: Strip any leading/trailing whitespace
-        xml = xml.strip()
-        return xml
-
+def llm_bt_to_pytrees(node):
+    node_type = node["type"]
+    name = node.get("name", node_type)
+    if node_type.lower() == "sequence":
+        tree_node = py_trees.composites.Sequence(name=name)
+    elif node_type.lower() == "selector":
+        tree_node = py_trees.composites.Selector(name=name)
+    elif node_type.lower() == "action":
+        tree_node = py_trees.behaviours.Success(name=name)  # Replace with real robot actions!
+    else:
+        raise ValueError(f"Unknown node type: {node_type}")
+    for child in node.get("children", []):
+        tree_node.add_child(llm_bt_to_pytrees(child))
+    return tree_node
 
 def main(args=None):
     rclpy.init(args=args)

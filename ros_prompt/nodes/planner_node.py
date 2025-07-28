@@ -58,50 +58,54 @@ class PlannerNode(Node):
             self.get_logger().warn("Capabilities not yet received. Skipping planning.")
             return
 
-        try:
-            bt_xml = self.llm_client.query_llm(
-                system_prompt=self.get_system_prompt(),
-                user_prompt=f"User Request: {user_text}",
-                final_instructions="""You must use the plugin_name value from the manifest as the XML tag name for each behavior/action.
-Do NOT use generic tags such as <Action>. Use only the plugin_name from the capabilities manifest for each node. Here is an example:
+        # try:
+        pydantic_bt = self.llm_client.query_langchain(user_text, self.capabilities)
+#             bt_xml = self.llm_client.query_llm(
+#                 system_prompt=self.get_system_prompt(),
+#                 user_prompt=f"User Request: {user_text}",
+#                 final_instructions="""You must use the plugin_name value from the manifest as the XML tag name for each behavior/action.
+# Do NOT use generic tags such as <Action>. Use only the plugin_name from the capabilities manifest for each node. Here is an example:
 
-<BehaviorTree ID="MainTree">
-  <Sequence>
-    <SetCmd_vel linear_x="0.2" linear_y="0.0" linear_z="0.0" angular_x="0.0" angular_y="0.0" angular_z="0.0"/>
-    <CommandHold duration="5"/>
-    <SetCmd_vel linear_x="0.0" linear_y="0.0" linear_z="0.0" angular_x="0.0" angular_y="0.0" angular_z="0.0"/>
-  </Sequence>
-</BehaviorTree>
+# <BehaviorTree ID="MainTree">
+#   <Sequence>
+#     <SetCmd_vel linear_x="0.2" linear_y="0.0" linear_z="0.0" angular_x="0.0" angular_y="0.0" angular_z="0.0"/>
+#     <CommandHold duration="5"/>
+#     <SetCmd_vel linear_x="0.0" linear_y="0.0" linear_z="0.0" angular_x="0.0" angular_y="0.0" angular_z="0.0"/>
+#   </Sequence>
+# </BehaviorTree>
 
-Here is another example:
+# Here is another example:
 
-<BehaviorTree ID="MainTree">
-  <NavigateToPose
-    pose_pose_position_x="0.0"
-    pose_pose_position_y="0.0"
-    pose_pose_position_z="0.0"
-    pose_pose_orientation_x="0.0"
-    pose_pose_orientation_y="0.0"
-    pose_pose_orientation_z="0.0"
-    pose_pose_orientation_w="1.0"/>
-</BehaviorTree>
+# <BehaviorTree ID="MainTree">
+#   <NavigateToPose
+#     pose_pose_position_x="0.0"
+#     pose_pose_position_y="0.0"
+#     pose_pose_position_z="0.0"
+#     pose_pose_orientation_x="0.0"
+#     pose_pose_orientation_y="0.0"
+#     pose_pose_orientation_z="0.0"
+#     pose_pose_orientation_w="1.0"/>
+# </BehaviorTree>
 
-Respond ONLY with the XML, no extra explanation.""",
-                # world_state=self.world_state,
-                max_tokens=1024,
-                temperature=0.2,
-                timeout=300
-            )
-            self.get_logger().info(f"Generated BT XML: {bt_xml}")
-        except Exception as e:
-            self.get_logger().error(f"Error querying LLM: {e}")
+# Respond ONLY with the XML, no extra explanation.""",
+#                 # world_state=self.world_state,
+#                 max_tokens=1024,
+#                 temperature=0.2,
+#                 timeout=300
+#             )
+        self.get_logger().info(f"Generated BT: {pydantic_bt}")
+        # except Exception as e:
+        #     self.get_logger().error(f"Error querying LLM: {e}")
+        #     return
 
-        try:
-            # Assuming bt_xml is a string containing the XML
-            if bt_xml:
-                self.publish_behavior_tree(bt_xml)
-        except Exception as e:
-            self.get_logger().error(f"Error generating behavior tree: {e}")
+        # try:
+            # Assuming bt is a pydantic model
+        if pydantic_bt:
+            # bt_json = pydantic_bt.model_dump_json()
+            bt_json = json.dumps(pydantic_bt, indent=2)
+            self.publish_behavior_tree(bt_json)
+        # except Exception as e:
+        #     self.get_logger().error(f"Error generating behavior tree: {e}")
 
     def get_system_prompt(self):
         system_prompt = (
@@ -113,9 +117,9 @@ Respond ONLY with the XML, no extra explanation.""",
         )
         return system_prompt
 
-    def publish_behavior_tree(self, bt_xml):
+    def publish_behavior_tree(self, bt_json):
         msg = String()
-        msg.data = bt_xml
+        msg.data = bt_json
         self.bt_pub.publish(msg)
         self.get_logger().info("Published new behavior tree.")
 
