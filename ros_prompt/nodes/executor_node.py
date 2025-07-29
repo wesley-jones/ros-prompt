@@ -108,7 +108,6 @@ class BTExecutorNode(Node):
             self.get_logger().info(f"Received capabilities: {self.capabilities}")            
         except Exception as e:
             self.get_logger().error(f"Error parsing capabilities: {e}")
-        self.bt_schema = BehaviorTree.openai_schema()
 
     def bt_callback(self, msg):
         self.get_logger().info(f"Received BT json: {msg.data[:100]}...")  # Log first 100 chars for brevity
