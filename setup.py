@@ -17,12 +17,10 @@ setup(
     ],
     install_requires=[
         'setuptools',
-        'llama-cpp-python',
         'py_trees',
-        'openai',
         'langchain',
         'langchain_openai',
-        'pydantic',
+        'jsonschema',
     ],
     zip_safe=True,
     maintainer='wesley-jones',

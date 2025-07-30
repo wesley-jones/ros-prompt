@@ -2,6 +2,21 @@ import importlib
 
 MODULE_PREFIX = "ros_prompt.adapters_py.builtins"
 
+def str_to_type(type_str):
+    """
+    Convert a string type from the manifest to a Python type.
+    Expand as needed for your types.
+    """
+    if type_str in [float, int, str, bool]:
+        return type_str  # Already a Python type (if manifest is parsed with real types)
+    mapping = {
+        'float': float,
+        'int': int,
+        'str': str,
+        'bool': lambda x: x in [True, "true", "True", 1, "1"],
+    }
+    return mapping[type_str]
+
 def find_manifest_entry(tag, manifest_map):
     # Search topics
     for topic in manifest_map.get('topics', []):

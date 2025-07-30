@@ -4,6 +4,7 @@ import os
 import requests
 from langchain_openai import ChatOpenAI
 from ros_prompt.utilities.bt_schema import build_behavior_tree_schema
+import jsonschema
 
 class LLMClient:
     def __init__(self, node, api_key=None):
@@ -120,14 +121,14 @@ class LLMClient:
             }
         }
 
-        schema = build_behavior_tree_schema(manifest)
-        self.logger.info(f"Using BehaviorTree schema: {schema}")
+        schema_dict = build_behavior_tree_schema(manifest)
+        self.logger.info(f"Using BehaviorTree schema: {schema_dict}")
 
         llm = ChatOpenAI(model="gpt-4.1", temperature=0, api_key=self.api_key)
 
         # 5. Pass the **dict** to with_structured_output
         structured_llm = llm.with_structured_output(
-            schema=schema,
+            schema=schema_dict,
             strict=True,
             method="function_calling"
         )
@@ -149,58 +150,10 @@ Only use the above actions; do not invent new ones.
 Task: {user_prompt}
 """
         self.logger.info(f"LLM prompt: {prompt}")
-        result = structured_llm.invoke(prompt)
-        self.logger.info(f"LLM response: {result}")
-        return result
-
-        # 3. Automatic retry on parse failure
-        # parser = RetryOutputParser(parser=structured_llm.output_parser, llm=llm, max_retries=1)
-
-        # 4. Prompt template
-#         prompt_1 = PromptTemplate.from_template("""
-# You are ROS Prompt's planner. Return ONE behaviour tree JSON
-# that starts with:
-# {{
-#   ""type"": "Sequence",
-#   "children": [ … ]
-# }}
-# Valid node types inside children are:
-# • Sequence          - ordered steps
-# • Selector          - try children until one succeeds
-# • Timeout {{seconds}} - limit a single child's runtime
-# • Repeater {{count}}  - run a single child N times
-# • Each capability leaf from the manifest with its own parameters
-# No other keys are allowed.
-# User request: {user_prompt}
-# """)
-
-        # 5. Load an example tree (optional)
-        # example_bt = {
-        #     "type": "Sequence",
-        #     "children": [
-        #         {
-        #             "type": "NavigateToPose",
-        #             "x": 0.6,
-        #             "y": 1.5,
-        #             "yaw": 0.1
-        #         }
-        #     ]
-        # }
-        # reply = (prompt | structured_llm).invoke({
-        #     "user_prompt": user_prompt,
-        #     # "schema": json.dumps(inline_schema)     <-- REMOVE
-        #     # "example": example_bt                  <-- keep if desired
-        # })
-        # reply = chain.invoke({
-        #     "user_prompt":   user_prompt,
-        #     "world_context": world_context,
-        #     "schema":        json.dumps(inline_schema, indent=2),   # ← here
-        #     "example":       example_bt,
-        # })
-        # self.logger.info(json.dumps(inline_schema, indent=2))
-        # reply = None
-
-        # return reply
+        result_dict = structured_llm.invoke(prompt)
+        self.logger.info(f"LLM response: {result_dict}")
+        jsonschema.validate(instance=result_dict, schema=schema_dict)
+        return result_dict
 
     def query_llm(self, system_prompt, user_prompt, final_instructions=None, world_state=None, max_tokens=256, temperature=0.2, timeout=20):
         # self.logger.info(f"Querying LLM with system prompt: {system_prompt}, user prompt: {user_prompt}, final instructions: {final_instructions}, world state: {world_state}")
