@@ -2,6 +2,7 @@
 import os
 from langchain_openai import ChatOpenAI
 from ros_prompt.utilities.bt_schema import build_behavior_tree_schema
+from ros_prompt.utilities.manifest_helpers import manifest_summary
 import jsonschema
 
 class LLMClient:
@@ -23,21 +24,28 @@ class LLMClient:
             strict=True,
             method="function_calling"
         )
+        # Auto-generate supported actions listing
+        actions_list = manifest_summary(manifest)
         prompt = f"""
 Generate a behavior tree for the provided task in JSON format that matches the provided schema. 
 
 Node types:
-- Sequence: Executes its children in order; succeeds only if all children succeed.
-- Selector: Tries its children in order; succeeds if any child succeeds.
-- Action: Leaf node. Use only supported actions.
+- Sequence: Executes its children in order; returns SUCCESS only if all children return SUCCESS. If any child returns FAILURE, the Sequence returns FAILURE. If a child returns RUNNING, the Sequence returns RUNNING.
+- Selector: Executes its children in order; returns SUCCESS if any child returns SUCCESS. If all children return FAILURE, the Selector returns FAILURE. If a child returns RUNNING, the Selector returns RUNNING.
+- Action: A leaf node that performs a single robot command. Returns RUNNING while executing, and then returns SUCCESS or FAILURE when done.
+
+Node statuses:
+- SUCCESS: The node completed its task successfully.
+- FAILURE: The node or one of its children failed to complete the task.
+- RUNNING: The node or one of its children is still working.
 
 Supported actions (Action nodes):
-- cmd_vel: Sends velocity commands (linear_x, linear_y, linear_z, angular_x, angular_y, angular_z).
-- navigate_to_pose: Navigates the robot to a given pose (x, y, theta).
+{actions_list}
 
 Every Action node must have the correct name and all required parameters.
 
 Only use the above actions; do not invent new ones.
+
 Task: {user_prompt}
 """
         self.logger.info(f"LLM prompt: {prompt}")

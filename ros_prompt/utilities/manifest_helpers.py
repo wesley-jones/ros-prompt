@@ -2,6 +2,23 @@ import importlib
 
 MODULE_PREFIX = "ros_prompt.adapters_py.builtins"
 
+def manifest_summary(manifest: dict) -> str:
+    lines = []
+    # Topics and Actions
+    for category in ["topics", "actions"]:
+        for item in manifest.get(category, []):
+            name = item['name']
+            params = ', '.join(item['params'].keys())
+            desc = item.get('description', '')
+            lines.append(f"- {name}: {desc or 'No description.'} ({params})")
+    # Builtins (if you want to include)
+    for item in manifest.get('builtins', []):
+        name = item['name']
+        params = ', '.join(item['params'].keys())
+        desc = item.get('description', '')
+        lines.append(f"- {name}: {desc or 'No description.'} ({params})")
+    return "\n".join(lines)
+
 def str_to_type(type_str):
     """
     Convert a string type from the manifest to a Python type.
