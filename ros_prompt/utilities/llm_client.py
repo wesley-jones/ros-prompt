@@ -3,7 +3,7 @@ from curses import wrapper
 import os
 import requests
 from langchain_openai import ChatOpenAI
-from ros_prompt.utilities.bt_schema import get_bt_tool_schema
+from ros_prompt.utilities.bt_schema import build_behavior_tree_schema
 
 class LLMClient:
     def __init__(self, node, api_key=None):
@@ -120,70 +120,14 @@ class LLMClient:
             }
         }
 
-
-        working_behavior_tree_schema = {
-            "title": "BehaviorTree",
-            "description": (
-                "A behavior tree for a robot. The root and all composite nodes must be a Sequence or Selector with a children array. "
-                "Action nodes must set type='Action', include a name (either 'cmd_vel' or 'navigate_to_pose'), "
-                "and must not have children (use an empty array for children in actions for schema compatibility)."
-            ),
-            "type": "object",
-            "properties": {
-                "type": {
-                    "type": "string",
-                    "description": "The node type (Sequence, Selector, or Action)."
-                },
-                "name": {
-                    "type": "string",
-                    "description": "The name of the action (for type Action)."
-                },
-                "parameters": {
-                    "type": "object",
-                    "description": "Parameters for the action node.",
-                    "additionalProperties": False     # <-- REQUIRED!
-                },
-                "children": {
-                    "type": "array",
-                    "items": {"$ref": "#/$defs/BTNode"},
-                    "description": "Child nodes of this node."
-                }
-            },
-            "required": ["type", "children", "name"],
-            "additionalProperties": False,
-            "$defs": {
-                "BTNode": {
-                    "type": "object",
-                    "properties": {
-                        "type": {"type": "string"},
-                        "name": {"type": "string"},
-                        "parameters": {
-                            "type": "object",
-                            "additionalProperties": False   # <-- REQUIRED!
-                        },
-                        "children": {
-                            "type": "array",
-                            "items": {"$ref": "#/$defs/BTNode"}
-                        }
-                    },
-                    "required": ["type", "children", "name"],
-                    "additionalProperties": False
-                }
-            }
-        }
-
-        # pydantic_schema = BehaviorTree.openai_schema()
-        # self.logger.info(f"Using BehaviorTree schema: {new_schema}")
-
-        # When generating the OpenAI function schema, use:
-        pydantic_schema = get_bt_tool_schema()
-        self.logger.info(f"Using BehaviorTree schema: {pydantic_schema}")
+        schema = build_behavior_tree_schema(manifest)
+        self.logger.info(f"Using BehaviorTree schema: {schema}")
 
         llm = ChatOpenAI(model="gpt-4.1", temperature=0, api_key=self.api_key)
 
         # 5. Pass the **dict** to with_structured_output
         structured_llm = llm.with_structured_output(
-            schema=pydantic_schema,
+            schema=schema,
             strict=True,
             method="function_calling"
         )
@@ -199,8 +143,7 @@ Supported actions (Action nodes):
 - cmd_vel: Sends velocity commands (linear_x, linear_y, linear_z, angular_x, angular_y, angular_z).
 - navigate_to_pose: Navigates the robot to a given pose (x, y, theta).
 
-Every Action node must have the correct name and all required parameters. 
-Action nodes must have "children": [].
+Every Action node must have the correct name and all required parameters.
 
 Only use the above actions; do not invent new ones.
 Task: {user_prompt}

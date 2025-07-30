@@ -12,7 +12,7 @@ from ros_prompt.utilities.ros_type_utils import import_ros_type
 from ros_prompt.utilities.bt_builder import build_py_tree
 from ros_prompt.adapters_py.generic_action_adapter import GenericActionAdapter
 from ros_prompt.behaviors_py.generic_action_behaviour import GenericActionBehaviour
-from ros_prompt.utilities.bt_schema import BehaviorTree
+from ros_prompt.utilities.manifest_helpers import find_manifest_entry, validate_and_coerce_attributes, load_class_from_manifest_entry
 
 def str_to_type(type_str):
     """

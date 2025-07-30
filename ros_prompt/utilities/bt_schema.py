@@ -1,83 +1,105 @@
-from typing import List, Literal, Union
-from pydantic import BaseModel, Field, ConfigDict
+# schema_builder.py
 
-# Action parameter models
-class CmdVelParameters(BaseModel):
-    linear_x: float
-    linear_y: float
-    linear_z: float
-    angular_x: float
-    angular_y: float
-    angular_z: float
-    model_config = ConfigDict(extra="forbid")
+def json_type(manifest_type):
+    """Map manifest type to JSON Schema type."""
+    if manifest_type == 'float':
+        return 'number'
+    elif manifest_type == 'str':
+        return 'string'
+    elif manifest_type == 'int':
+        return 'integer'
+    elif manifest_type == 'bool':
+        return 'boolean'
+    # Expand as needed
+    return 'string'  # fallback
 
-class NavigateToPoseParameters(BaseModel):
-    x: float
-    y: float
-    theta: float
-    model_config = ConfigDict(extra="forbid")
-
-# Forward declaration for recursion
-class BTNode(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-# Composite nodes
-class SequenceNode(BaseModel):
-    """A Sequence node: runs child nodes in order, succeeding only if all children succeed."""
-    type: Literal["Sequence"]
-    children: List["BTNode"]
-    model_config = ConfigDict(extra="forbid")
-    
-class SelectorNode(BaseModel):
-    """A Selector node: runs child nodes in order, succeeding if any child succeeds."""
-    type: Literal["Selector"]
-    children: List["BTNode"]
-    model_config = ConfigDict(extra="forbid")
-
-# Action nodes
-class CmdVelActionNode(BaseModel):
-    """Set robot linear and angular velocities indefinitely until further notice."""
-    type: Literal["Action"]
-    name: Literal["cmd_vel"]
-    parameters: CmdVelParameters
-    model_config = ConfigDict(extra="forbid")
-
-class NavigateToPoseActionNode(BaseModel):
-    """Navigate the robot to a specified pose in the world."""
-    type: Literal["Action"]
-    name: Literal["navigate_to_pose"]
-    parameters: NavigateToPoseParameters
-    model_config = ConfigDict(extra="forbid")
-
-# BTNode is a union for children, but NOT for the root
-BTNode = Union[
-    SequenceNode,
-    SelectorNode,
-    CmdVelActionNode,
-    NavigateToPoseActionNode,
-]
-
-# Patch up references for recursion
-SequenceNode.model_rebuild()
-SelectorNode.model_rebuild()
-
-# ---- Root must be SequenceNode or SelectorNode only ----
-
-# Example:
-class BehaviorTree(BaseModel):
-    type: Literal["Sequence", "Selector"]
-    children: List[BTNode]
-
-def get_bt_tool_schema():
-    """
-    Returns the OpenAI function-calling tool schema for the BehaviorTree.
-    """
-    # Guarantee OpenAI compliance:
-    # schema["additionalProperties"] = False
+def make_action_schema(action, is_topic=False):
+    name = action["name"]
+    # Prepare parameters object
+    parameters = action["params"]
+    props = {}
+    required = []
+    for p_name, p_spec in parameters.items():
+        if isinstance(p_spec, dict):
+            p_type = p_spec.get("type", "string")
+        else:
+            p_type = p_spec  # if manifest has bare type string
+        props[p_name] = {"type": json_type(p_type)}
+        required.append(p_name)
     return {
-        "name": "BehaviorTree",
-        "description": (
-            "A behavior tree for a robot. The root must be a Sequence or Selector node."
-        ),
-        "parameters": BehaviorTree.model_json_schema()
+        "type": "object",
+        "description": action.get("description", ""),
+        "properties": {
+            "type": {"type": "string", "enum": ["Action"]},
+            "name": {"type": "string", "enum": [name]},
+            "parameters": {
+                "type": "object",
+                "properties": props,
+                "required": required,
+                "additionalProperties": False
+            }
+        },
+        "required": ["type", "name", "parameters"],
+        "additionalProperties": False
     }
+
+def build_behavior_tree_schema(manifest):
+    # Static Sequence/Selector nodes
+    composites = [
+        {
+            "type": "object",
+            "description": "A Sequence node: runs child nodes in order, succeeding only if all children succeed.",
+            "properties": {
+                "type": { "type": "string", "enum": ["Sequence"] },
+                "children": {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/BTNode" }
+                }
+            },
+            "required": ["type", "children"],
+            "additionalProperties": False
+        },
+        {
+            "type": "object",
+            "description": "A Selector node: runs child nodes in order, succeeding if any child succeeds.",
+            "properties": {
+                "type": { "type": "string", "enum": ["Selector"] },
+                "children": {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/BTNode" }
+                }
+            },
+            "required": ["type", "children"],
+            "additionalProperties": False
+        },
+    ]
+    # Action nodes from topics
+    topic_actions = [make_action_schema(topic, is_topic=True) for topic in manifest.get("topics", [])]
+    # Action nodes from actions
+    real_actions = [make_action_schema(action) for action in manifest.get("actions", [])]
+    # Builtins (treat same as actions)
+    builtins = [make_action_schema(builtin) for builtin in manifest.get("builtins", [])]
+    all_nodes = composites + topic_actions + real_actions + builtins
+    schema = {
+        "title": "BehaviorTree",
+        "description": (
+            "A behavior tree for a robot. The root and all composite nodes must be a Sequence or Selector with a children array. "
+            "Action nodes must set type='Action', include a name, and must not have children."
+        ),
+        "type": "object",
+        "properties": {
+            "type": {"type": "string", "enum": ["Sequence", "Selector"]},
+            "children": {
+                "type": "array",
+                "items": {"$ref": "#/$defs/BTNode"}
+            }
+        },
+        "required": ["type", "children"],
+        "additionalProperties": False,
+        "$defs": {
+            "BTNode": {
+                "anyOf": all_nodes
+            }
+        }
+    }
+    return schema

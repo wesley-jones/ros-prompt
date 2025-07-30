@@ -1,8 +1,8 @@
 robot_caps:
   actions:
-    - name: "/navigate_to_pose"
+    - name: "NavigateToPose"
       type: "nav2_msgs/action/NavigateToPose"
-      plugin_name: "NavigateToPose"
+      plugin_name: "/navigate_to_pose"
       description: "Navigate the robot to a specified pose in the world."
       interface: "action_client"
       params:
@@ -10,13 +10,13 @@ robot_caps:
           type: "str"
           value: "map"
   topics:
-    - name: "/cmd_vel"
+    - name: "SetCmd_vel"
       type: "geometry_msgs/msg/Twist"
-      plugin_name: "SetCmd_vel"
+      plugin_name: "/cmd_vel"
       description: "Set robot linear and angular velocities indefinitely until further notice."
       interface: "topic_publisher"
   builtins:
-    - name: "Command Hold"
+    - name: "CommandHold"
       plugin_name: "CommandHold"
       class_file: "command_hold_adapter"
       description: "A time period during which the robot intentionally refrains from submitting any new commands. This is typically used to prevent unintended actions, ensure safety, or allow ongoing operations to complete without interference. No new movement, navigation, or actuation instructions are sent while in this state."

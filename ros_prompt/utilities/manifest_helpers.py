@@ -5,15 +5,15 @@ MODULE_PREFIX = "ros_prompt.adapters_py.builtins"
 def find_manifest_entry(tag, manifest_map):
     # Search topics
     for topic in manifest_map.get('topics', []):
-        if topic.get('plugin_name') == tag or topic.get('name') == tag:
+        if topic.get('name') == tag or topic.get('name') == tag:
             return topic
     # Search actions
     for action in manifest_map.get('actions', []):
-        if action.get('plugin_name') == tag or action.get('name') == tag:
+        if action.get('name') == tag or action.get('name') == tag:
             return action
     # Search builtins
     for builtin in manifest_map.get('builtins', []):
-        if builtin.get('plugin_name') == tag:
+        if builtin.get('name') == tag:
             return builtin
     return None  # Not found
 
@@ -94,7 +94,7 @@ def validate_and_coerce_attributes(tag, attrib, manifest_map):
 
 def load_class_from_manifest_entry(manifest_entry):
     file_name = manifest_entry['class_file']
-    class_name = manifest_entry['plugin_name']
+    class_name = manifest_entry['name']
     module_name = f"{MODULE_PREFIX}.{file_name}"
     module = importlib.import_module(module_name)
     cls = getattr(module, class_name)

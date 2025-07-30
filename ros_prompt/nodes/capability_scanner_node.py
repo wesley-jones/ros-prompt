@@ -219,9 +219,9 @@ def load_dynamic_manifest(self):
             continue
         params = extract_params_from_msg(self, msg_cls)
         entry = {
-            'name': topic_name,
+            'plugin_name': topic_name,
             'type': msg_type_str,
-            'plugin_name': f"Set{topic_name.strip('/').replace('/', '_').capitalize()}",
+            'name': f"Set{topic_name.strip('/').replace('/', '_').capitalize()}",
             'params': params,
         }
         manifest['topics'].append(entry)
@@ -236,9 +236,9 @@ def load_dynamic_manifest(self):
             continue
         params = extract_params_from_msg(self, action_cls.Goal)  # Use the Goal submessage for params
         entry = {
-            'name': action_name,
+            'plugin_name': action_name,
             'type': action_type,
-            'plugin_name': f"{action_type.split('/')[-1]}",
+            'name': f"{action_type.split('/')[-1]}",
             'params': params,
             'interface': 'action_client',
         }
