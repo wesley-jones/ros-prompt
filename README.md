@@ -15,14 +15,10 @@ Natural language robot control for ROS 2 using LLMs (Mistral, Llama, etc).
 - Modular and extensible ROS 2 package
 
 ## Getting Started
-### 🔑 Setting your LLM API secret
-
-1. Install ROS Prompt (`pip install ros_prompt` or colcon build).
-2. Run `export ROS_PROMPT_OPENAI_KEY="sk-..."` with your own API key.
-   • Prefer DeepSeek? `export ROS_PROMPT_DEEPSEEK_KEY="..."`.
-3. Launch the stack
+1. Run `export ROS_PROMPT_OPENAI_KEY="sk-..."` with your own API key.
+2. colcon build
+3. ros2 launch ros_prompt ros_prompt.launch.py
 
 
 ## License
 MIT
-
