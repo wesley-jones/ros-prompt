@@ -13,7 +13,7 @@ class GenericActionBehaviour(py_trees.behaviour.Behaviour):
 
     def initialise(self):
         self.get_logger().info(f"Initialising {self.name} (sending goal): {self.params}")
-        self.adapter.execute(**self.params)
+        self.adapter.execute(timeout=self.timeout,**self.params)
         self.started = True
         self.start_time = time.time()
 
