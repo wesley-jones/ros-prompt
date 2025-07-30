@@ -6,7 +6,7 @@
 [![Made with py_trees](https://img.shields.io/badge/BT-py_trees-8a2be2)](https://github.com/splintered-reality/py_trees)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Natural language robot control for ROS 2 using LLMs (Mistral, Llama, etc).
+Natural language robot control for ROS 2 using LLMs (LangChain).
 
 ## Features
 - Understands and plans robot actions from natural language
