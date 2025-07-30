@@ -39,7 +39,7 @@ class BTExecutorNode(Node):
     def capabilities_callback(self, msg):
         try:
             self.capabilities = json.loads(msg.data)
-            self.get_logger().info(f"Received capabilities: {self.capabilities}")            
+            self.get_logger().info(f"Received capabilities: {self.capabilities}")
         except Exception as e:
             self.get_logger().error(f"Error parsing capabilities: {e}")
 

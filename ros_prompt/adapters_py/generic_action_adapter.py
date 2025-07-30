@@ -20,15 +20,12 @@ class GenericActionAdapter:
         for k, v in goal_kwargs.items():
             set_nested_attr(goal_msg, k, v)
         self.status = "pending"
-        self.node.get_logger().info(f"Waiting for action server '{self.action_name}' to be available...")
         success = self.client.wait_for_server(timeout_sec=timeout)
         if not success:
             self.node.get_logger().error(f"Timed out waiting for action server '{self.action_name}'")
             self.status = "rejected"
             return
-        self.node.get_logger().info(f"Action server '{self.action_name}' is available. Sending goal...")
         send_goal_future = self.client.send_goal_async(goal_msg)
-        self.node.get_logger().info(f"Goal sent, waiting for response...")
         send_goal_future.add_done_callback(self._goal_response_callback)
 
     def _goal_response_callback(self, future):

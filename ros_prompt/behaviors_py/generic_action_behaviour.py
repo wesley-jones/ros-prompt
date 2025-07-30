@@ -19,7 +19,6 @@ class GenericActionBehaviour(py_trees.behaviour.Behaviour):
 
     def update(self):
         status = self.adapter.check_status()
-        self.get_logger().info(f"{self.name} status: {status}")
         if status == "succeeded":
             return py_trees.common.Status.SUCCESS
         elif status in ["rejected", "cancelled"]:
