@@ -72,14 +72,66 @@ def build_behavior_tree_schema(manifest):
             "required": ["type", "children"],
             "additionalProperties": False
         },
+        {
+            "type": "object",
+            "description": "A Parallel node: runs all child nodes simultaneously; succeeds only if all children succeed.",
+            "properties": {
+                "type": { "type": "string", "enum": ["Parallel"] },
+                "children": {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/BTNode" }
+                },
+            },
+            "required": ["type", "children"],
+            "additionalProperties": False
+        },
     ]
+
+    # Add decorator nodes
+    decorators = [
+        {
+            "type": "object",
+            "description": "Timeout decorator: returns FAILURE if its child does not finish within 'duration' seconds.",
+            "properties": {
+                "type": { "type": "string", "enum": ["Timeout"] },
+                "child": { "$ref": "#/$defs/BTNode" },
+                "duration": { "type": "number", "minimum": 0.0 }
+            },
+            "required": ["type", "child", "duration"],
+            "additionalProperties": False
+        },
+        {
+            "type": "object",
+            "description": "Repeat decorator: repeats its child node a given number of times.",
+            "properties": {
+                "type": { "type": "string", "enum": ["Repeat"] },
+                "child": { "$ref": "#/$defs/BTNode" },
+                "num_repeats": { "type": "integer", "minimum": 1 }
+            },
+            "required": ["type", "child", "num_repeats"],
+            "additionalProperties": False
+        },
+        {
+            "type": "object",
+            "description": "Retry decorator: re-executes its child if it fails, up to 'num_retries' times.",
+            "properties": {
+                "type": { "type": "string", "enum": ["Retry"] },
+                "child": { "$ref": "#/$defs/BTNode" },
+                "num_retries": { "type": "integer", "minimum": 1 }
+            },
+            "required": ["type", "child", "num_retries"],
+            "additionalProperties": False
+        },
+    ]
+
+
     # Action nodes from topics
     topic_actions = [make_action_schema(topic, is_topic=True) for topic in manifest.get("topics", [])]
     # Action nodes from actions
     real_actions = [make_action_schema(action) for action in manifest.get("actions", [])]
     # Builtins (treat same as actions)
     builtins = [make_action_schema(builtin) for builtin in manifest.get("builtins", [])]
-    all_nodes = composites + topic_actions + real_actions + builtins
+    all_nodes = composites + decorators + topic_actions + real_actions + builtins
     schema = {
         "title": "BehaviorTree",
         "description": (
@@ -88,7 +140,7 @@ def build_behavior_tree_schema(manifest):
         ),
         "type": "object",
         "properties": {
-            "type": {"type": "string", "enum": ["Sequence", "Selector"]},
+            "type": {"type": "string", "enum": ["Sequence", "Selector", "Parallel"]},
             "children": {
                 "type": "array",
                 "items": {"$ref": "#/$defs/BTNode"}

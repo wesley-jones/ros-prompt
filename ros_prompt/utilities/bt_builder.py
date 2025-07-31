@@ -13,18 +13,34 @@ def parse_bt_dict(self, bt_dict, manifest_map):
         name = node.get("name")  # Only present for Action nodes
 
         # Composite nodes
-        if node_type in ["Sequence", "Selector"]:
+        if node_type in ["Sequence", "Selector", "Parallel"]:
             # You can add Fallback, Parallel, etc, if you add them to the schema
             if node_type == "Sequence":
                 behaviour = py_trees.composites.Sequence(name="Sequence", memory=True)
             elif node_type == "Selector":
-                behaviour = py_trees.composites.Selector(name="Selector")
+                behaviour = py_trees.composites.Selector(name="Selector", memory=True)
+            elif node_type == "Parallel":
+                behaviour = py_trees.composites.Parallel(name="Parallel")
             else:
                 raise ValueError(f"Unknown composite type: {node_type}")
             for child in node.get("children", []):
                 child_behaviour = build_tree(child)
                 behaviour.add_child(child_behaviour)
             return behaviour
+
+        # --- Decorators ---
+        elif node_type == "Timeout":
+            child = build_tree(node["child"])
+            duration = node["duration"]
+            return py_trees.decorators.Timeout(child=child, duration=duration, name="Timeout")
+        elif node_type == "Repeat":
+            child = build_tree(node["child"])
+            num_repeats = node["num_repeats"]
+            return py_trees.decorators.Repeat(child=child, num_success=num_repeats, name="Repeat")
+        elif node_type == "Retry":
+            child = build_tree(node["child"])
+            num_retries = node["num_retries"]
+            return py_trees.decorators.Retry(child=child, num_failures=num_retries, name="Retry")
 
         # Action nodes (leaf)
         elif node_type == "Action":

@@ -1,5 +1,7 @@
 from rclpy.action import ActionClient
+from action_msgs.msg import GoalStatus
 from ros_prompt.utilities.ros_type_utils import set_nested_attr
+
 
 class GenericActionAdapter:
     def __init__(self, node, action_name, action_type):
@@ -30,6 +32,7 @@ class GenericActionAdapter:
 
     def _goal_response_callback(self, future):
         goal_handle = future.result()
+        self.node.get_logger().info(f"Received goal handle: {goal_handle}")
         if not goal_handle.accepted:
             self.status = "rejected"
             self.node.get_logger().error("Goal was rejected by the action server.")
@@ -37,19 +40,32 @@ class GenericActionAdapter:
         self.goal_handle = goal_handle
         self.result_future = goal_handle.get_result_async()
         self.result_future.add_done_callback(self._result_callback)
+        self.node.get_logger().info(f"Setting '{self.action_name}' status to 'active'")
         self.status = "active"
 
     def _result_callback(self, future):
-        result = future.result().result
-        self.result = result
-        self.status = "succeeded"
-        self.node.get_logger().info(f"Action result: {result}")
+        result_obj = future.result()
+        status = result_obj.status
+        result_msg = result_obj.result
+        self.node.get_logger().info(
+            f"Action '{self.action_name}' completed. Status: {status}, Result: {result_msg}"
+        )
+        self.result = result_msg
+        if status == GoalStatus.STATUS_SUCCEEDED:
+            self.status = "succeeded"
+        elif status == GoalStatus.STATUS_ABORTED:
+            self.status = "aborted"
+        elif status == GoalStatus.STATUS_CANCELED:
+            self.status = "cancelled"
+        else:
+            # This covers unknown, accepted, executing, canceling, etc.
+            self.status = "unknown"
+            self.node.get_logger().warn(f"Unexpected action status {status} for '{self.action_name}'")
+        self.node.get_logger().info(f"Action '{self.action_name}' status updated to: {self.status}")
 
     def check_status(self):
+        self.node.get_logger().info(f"Checking status of action '{self.action_name}': {self.status}")
         return self.status
-
-    def get_result(self):
-        return self.result
 
     def cancel_goal(self):
         if self.goal_handle and self.status in ["active", "pending"]:

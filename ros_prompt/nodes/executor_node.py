@@ -61,12 +61,12 @@ class BTExecutorNode(Node):
             with self.lock:
                 if self.current_tree:
                     for node in self.current_tree.root.iterate():
-                        self.get_logger().info(f"## Before ### Node: {node.name}, Status: {node.status}")
+                        self.get_logger().info(f"## Before tick ### Node: {node.name}, Status: {node.status}")
                     self.current_tree.tick()
-                    status = self.current_tree.root.status
-                    self.get_logger().info(f"Tick returned status: {status}")
                     for node in self.current_tree.root.iterate():
-                        self.get_logger().info(f"## After ### Node: {node.name}, Status: {node.status}")
+                        self.get_logger().info(f"## After tick ### Node: {node.name}, Status: {node.status}")
+                    status = self.current_tree.root.status
+                    self.get_logger().info(f"Tree status: {status}")
                     if status in [py_trees.common.Status.SUCCESS, py_trees.common.Status.FAILURE]:
                         self.get_logger().info("Tree complete; clearing current_tree.")
                         self.current_tree = None
