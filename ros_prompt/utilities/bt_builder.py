@@ -16,7 +16,7 @@ def parse_bt_dict(self, bt_dict, manifest_map):
         if node_type in ["Sequence", "Selector"]:
             # You can add Fallback, Parallel, etc, if you add them to the schema
             if node_type == "Sequence":
-                behaviour = py_trees.composites.Sequence(name="Sequence", memory=False)
+                behaviour = py_trees.composites.Sequence(name="Sequence", memory=True)
             elif node_type == "Selector":
                 behaviour = py_trees.composites.Selector(name="Selector")
             else:
@@ -54,11 +54,7 @@ def parse_bt_dict(self, bt_dict, manifest_map):
                 behaviour = behaviour_class(**coerced_params, name=tag)
             else:
                 raise ValueError(f"Unknown capability interface: {interface}")
-            return py_trees.decorators.OneShot(
-                name=f"OneShot_{tag}",
-                child=behaviour,
-                policy=py_trees.common.OneShotPolicy.ON_SUCCESSFUL_COMPLETION
-            )
+            return behaviour
         else:
             raise ValueError(f"Unknown node type: {node_type}")
 
