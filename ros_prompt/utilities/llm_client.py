@@ -46,10 +46,12 @@ Please include retries to make the tree more robust.
 Please include appropriate timeout thresholds so that never-ending tasks can be handled gracefully.
 Please include Selectors to handle failure cases.
 
+
 Node statuses:
 - SUCCESS: The node completed its task successfully.
 - FAILURE: The node or one of its children failed to complete the task.
 - RUNNING: The node or one of its children is still working.
+
 
 Each node returns one of: SUCCESS, FAILURE, RUNNING.
 
