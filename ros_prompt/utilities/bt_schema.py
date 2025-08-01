@@ -124,6 +124,17 @@ def build_behavior_tree_schema(manifest):
         },
     ]
 
+    timer_node = {
+        "type": "object",
+        "description": "A Timer node: waits for a specified duration in seconds before returning SUCCESS.",
+        "properties": {
+            "type": { "type": "string", "enum": ["Timer"] },
+            "duration": { "type": "number", "minimum": 0.0 }
+        },
+        "required": ["type", "duration"],
+        "additionalProperties": False
+    }
+
 
     # Action nodes from topics
     topic_actions = [make_action_schema(topic, is_topic=True) for topic in manifest.get("topics", [])]
@@ -131,7 +142,7 @@ def build_behavior_tree_schema(manifest):
     real_actions = [make_action_schema(action) for action in manifest.get("actions", [])]
     # Builtins (treat same as actions)
     builtins = [make_action_schema(builtin) for builtin in manifest.get("builtins", [])]
-    all_nodes = composites + decorators + topic_actions + real_actions + builtins
+    all_nodes = composites + decorators + [timer_node] + topic_actions + real_actions + builtins
     schema = {
         "title": "BehaviorTree",
         "description": (

@@ -34,6 +34,7 @@ Node types:
 - Selector: Executes its children in order; returns SUCCESS if any child returns SUCCESS. If all children return FAILURE, the Selector returns FAILURE. If a child returns RUNNING, the Selector returns RUNNING.
 - Parallel: Runs all children in parallel; returns SUCCESS if all children return SUCCESS. If any child returns FAILURE, the Parallel returns FAILURE. If a child returns RUNNING, the Parallel returns RUNNING.
 - Action: A leaf node that performs a single robot command. Returns RUNNING while executing, and then returns SUCCESS or FAILURE when done.
+- Timer: Waits for a specified 'duration' (seconds) before returning SUCCESS. Returns RUNNING while waiting.
 
 Decorator nodes:
 - Timeout: Returns FAILURE if its child node does not finish within the specified 'duration' (seconds). Example: {{ "type": "Timeout", "duration": 5.0, "child": ... }}

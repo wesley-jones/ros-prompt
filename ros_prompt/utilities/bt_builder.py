@@ -1,3 +1,4 @@
+from platform import node
 import py_trees
 from ros_prompt.utilities.manifest_helpers import find_manifest_entry, validate_and_coerce_attributes, load_class_from_manifest_entry
 from ros_prompt.utilities.ros_type_utils import import_ros_type
@@ -41,6 +42,10 @@ def parse_bt_dict(self, bt_dict, manifest_map):
             child = build_tree(node["child"])
             num_retries = node["num_retries"]
             return py_trees.decorators.Retry(child=child, num_failures=num_retries, name="Retry")
+
+        # --- Other node types ---
+        if node_type == "Timer":
+            return py_trees.timers.Timer(name="Timer", duration=node["duration"])
 
         # Action nodes (leaf)
         elif node_type == "Action":
