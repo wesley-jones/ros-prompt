@@ -18,7 +18,6 @@ class LLMClient:
 
         llm = ChatOpenAI(model="gpt-4.1", temperature=0, api_key=self.api_key)
 
-        # 5. Pass the **dict** to with_structured_output
         structured_llm = llm.with_structured_output(
             schema=schema_dict,
             strict=True,
@@ -26,6 +25,10 @@ class LLMClient:
         )
         # Auto-generate supported actions listing
         actions_list = manifest_summary(manifest)
+        if not actions_list:
+            self.logger.error("No actions found in manifest, aborting request.")
+            return None
+
         prompt = f"""
 Generate a behavior tree for the provided task in JSON format that matches the provided schema. 
 

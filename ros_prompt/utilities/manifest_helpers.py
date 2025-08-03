@@ -55,11 +55,11 @@ def validate_and_coerce_attributes(tag, attrib, manifest_map):
 
     Precedence (highest first):
         1. param_spec['value']        -> *hard constant* (overrides runtime)
-        2. runtime XML attribute      -> user/operator override
+        2. runtime attribute          -> user/operator override
         3. param_spec['default']      -> fallback
         (skip param if none of the above provides a value)
 
-    If XML supplies a value that conflicts with a fixed constant
+    If LLM supplies a value that conflicts with a fixed constant
     (i.e. a 'value' entry in YAML), we keep the constant and log a warning.
     """
     cap = find_manifest_entry(tag, manifest_map)
@@ -126,7 +126,7 @@ def validate_and_coerce_attributes(tag, attrib, manifest_map):
 
 def load_class_from_manifest_entry(manifest_entry):
     file_name = manifest_entry['class_file']
-    class_name = manifest_entry['name']
+    class_name = manifest_entry['class_name']
     module_name = f"{MODULE_PREFIX}.{file_name}"
     module = importlib.import_module(module_name)
     cls = getattr(module, class_name)

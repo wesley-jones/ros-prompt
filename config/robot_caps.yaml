@@ -1,3 +1,5 @@
+# This file is used to define the supported robot capabilities and actions available to ROS Prompt.
+# Any parameters provided here will override anything returned by the LLM.
 robot_caps:
   actions:
     - name: "NavigateToPose"
@@ -15,7 +17,7 @@ robot_caps:
       plugin_name: "/cmd_vel"
       description: "Set robot linear and angular velocities indefinitely until further notice."
       interface: "topic_publisher"
-  # builtins:
+  builtins:
     # - name: "DontUse"
     #   plugin_name: "DontUse"
     #   class_file: "command_adapter"
@@ -23,3 +25,58 @@ robot_caps:
     #   params:
     #     duration: "float"
     #   interface: "builtin"
+    # ─────────────────────────────────────────────────────────────
+    # Start SLAM ‣ stop any Nav2 bringup & relaunch in SLAM mode
+    # ─────────────────────────────────────────────────────────────
+    - name: "StartSLAMMapping"
+      class_name: "LaunchManager"
+      class_file: "launch_manager_adapter"
+      interface: "builtin"
+      description: "Restart Nav2 with slam:=True so the robot can build a map."
+      params:
+        launch_file:
+          type: str
+          value: "nav2_bringup/bringup_launch.py"
+
+        launch_args:
+          type: str
+          value: "slam:=True autostart:=True use_sim_time:=True"
+
+        match_glob:
+          type: str
+          value: "*bringup_launch*"     # which procs to stop
+
+        success_topics:
+          type: str                     # comma-separated list
+          value: "/map,/slam_toolbox/pose"
+
+    # ─────────────────────────────────────────────────────────────
+    # Start Localization ‣ switch to static-map + AMCL mode
+    # ─────────────────────────────────────────────────────────────
+    - name: "StartLocalization"
+      class_name: "LaunchManager"
+      class_file: "launch_manager_adapter"
+      interface: "builtin"
+      description: "Restart Nav2 with a saved map and AMCL."
+      params:
+        launch_file:
+          type: str
+          value: "nav2_bringup/bringup_launch.py"
+
+        launch_args:
+          type: str
+          value: "slam:=False autostart:=True use_sim_time:=True"
+
+        # ----- slot the LLM (or caller) must fill ----------------
+        map_yaml:
+          type: str
+          default: "~/my_map.yaml"
+          # if LLM supplies a different path, it overrides default
+
+        match_glob:
+          type: str
+          value: "*bringup_launch*"
+
+        success_topics:
+          type: str
+          value: "/map,/amcl_pose"
