@@ -33,8 +33,8 @@ class LLMClient:
 Generate a behavior tree for the provided task in JSON format that matches the provided schema. 
 
 Node types:
-- Sequence: Executes its children in order; returns SUCCESS only if all children return SUCCESS. If any child returns FAILURE, the Sequence returns FAILURE. If a child returns RUNNING, the Sequence returns RUNNING.
-- Selector: Executes its children in order; returns SUCCESS if any child returns SUCCESS. If all children return FAILURE, the Selector returns FAILURE. If a child returns RUNNING, the Selector returns RUNNING.
+- Sequence: Executes its children in order; If a child returns SUCCESS it proceeds to the next child. If a child returns FAILURE, the Sequence terminates. If a child returns RUNNING, the Sequence will continue to check its status until it fails or succeeds. If all children return SUCCESS, the Sequence returns SUCCESS otherwise it returns FAILURE.
+- Selector: Executes its children in order; If a child returns SUCCESS it proceeds to the next child. If a child returns FAILURE it proceeds to the next child. If a child returns RUNNING, the Selector will continue to check its status until it fails or succeeds. If all children return FAILURE, the Selector returns FAILURE otherwise it returns SUCCESS.
 - Parallel: Runs all children in parallel; returns SUCCESS if all children return SUCCESS. If any child returns FAILURE, the Parallel returns FAILURE. If a child returns RUNNING, the Parallel returns RUNNING.
 - Action: A leaf node that performs a single robot command. Returns RUNNING while executing, and then returns SUCCESS or FAILURE when done.
 - Timer: Waits for a specified 'duration' (seconds) before returning SUCCESS. Returns RUNNING while waiting.
@@ -45,10 +45,6 @@ Decorator nodes:
 - Retry: Retries its child node up to a set number of times if it fails. Example: {{ "type": "Retry", "num_retries": 2, "child": ... }}
 
 Only use the node types and decorators described above. Do not invent new ones.
-Please include retries to make the tree more robust.
-Please include appropriate timeout thresholds so that never-ending tasks can be handled gracefully.
-Please include Selectors to handle failure cases.
-
 
 Node statuses:
 - SUCCESS: The node completed its task successfully.

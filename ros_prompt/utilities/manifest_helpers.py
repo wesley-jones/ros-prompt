@@ -1,23 +1,26 @@
 import importlib
+from ros_prompt.utilities.constants import CapabilityCategory
 
 MODULE_PREFIX = "ros_prompt.adapters_py.builtins"
 
 def manifest_summary(manifest: dict) -> str:
-    lines = []
-    # Topics and Actions
-    for category in ["topics", "actions"]:
-        for item in manifest.get(category, []):
-            name = item['name']
-            params = ', '.join(item['params'].keys())
-            desc = item.get('description', '')
-            lines.append(f"- {name}: {desc or 'No description.'} ({params})")
-    # Builtins (if you want to include)
-    for item in manifest.get('builtins', []):
-        name = item['name']
-        params = ', '.join(item['params'].keys())
-        desc = item.get('description', '')
-        lines.append(f"- {name}: {desc or 'No description.'} ({params})")
-    return "\n".join(lines)
+    """
+    Produce one line per capability:
+      - <Name>: <description> (<param1, param2, ...>)
+    Searches topics, actions, services, builtins in that order.
+    """
+    def fmt(item: dict) -> str:
+        desc   = item.get("description", "No description.")
+        params = ", ".join(item.get("params", {}).keys()) or "no params"
+        return f"- {item['name']}: {desc} ({params})"
+
+    categories = CapabilityCategory.ordered()
+    return "\n".join(
+        fmt(item)
+        for cat in categories
+        for item in manifest.get(cat, [])
+    )
+
 
 def str_to_type(type_str):
     """
@@ -34,20 +37,16 @@ def str_to_type(type_str):
     }
     return mapping[type_str]
 
-def find_manifest_entry(tag, manifest_map):
-    # Search topics
-    for topic in manifest_map.get('topics', []):
-        if topic.get('name') == tag or topic.get('name') == tag:
-            return topic
-    # Search actions
-    for action in manifest_map.get('actions', []):
-        if action.get('name') == tag or action.get('name') == tag:
-            return action
-    # Search builtins
-    for builtin in manifest_map.get('builtins', []):
-        if builtin.get('name') == tag:
-            return builtin
-    return None  # Not found
+def find_manifest_entry(tag: str, manifest_map: dict) -> dict | None:
+    """
+    Return the first entry in manifest_map whose 'name' matches *tag*.
+    Searches topics → actions → services → builtins (keep legacy order).
+    """
+    for section in CapabilityCategory.ordered():
+        for entry in manifest_map.get(section, []):
+            if entry.get("name") == tag:
+                return entry
+    return None
 
 def validate_and_coerce_attributes(tag, attrib, manifest_map):
     """

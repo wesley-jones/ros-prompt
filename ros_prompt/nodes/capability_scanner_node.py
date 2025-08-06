@@ -6,9 +6,9 @@ import json
 from ament_index_python.packages import get_package_share_directory
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 import os
-import importlib
 import re
 from ros_prompt.utilities.ros_type_utils import import_ros_type
+from ros_prompt.utilities.constants import CapabilityCategory
 
 # Define the mapping in one place
 TYPENAME_MAP = {
@@ -147,132 +147,68 @@ def load_robot_capabilities(self):
             pass  # Already a dict, or not parseable as YAML
     return caps
 
-def merge_manifest_with_capabilities(self, dynamic_manifest, robot_caps):
+def _hydrate_entry(entry: dict, logger):
     """
-    Merges actions and topics present in robot_caps, adds descriptions, and merges any extra metadata.
-    :param dynamic_manifest: dict with 'topics' and 'actions'
-    :param robot_caps: dict with 'topics', 'actions', and 'builtins'
-    :return: merged manifest dict
+    • Import the interface class referenced in entry["type"]
+        - topics   → msg class
+        - actions  → <Action>.Goal
+        - services → <Service>.Request
+    • Auto-derive a full params dict from the class.
+    • Overlay YAML-supplied param blocks so lock-ins win.
+    • Return the hydrated entry, or None on import failure.
     """
-    def merge_section(dynamic_section, caps_section, section_name):
-        """
-        Keep ONLY the capabilities that are listed in robot_caps.yaml.
-        Within each one, merge params with robot_caps taking precedence.
-        """
-        dyn_map = {d['name']: d for d in dynamic_section}
+    try:
+        iface = import_ros_type(logger, entry["type"])
+        if entry["interface"] == "action_client":
+            iface = iface.Goal
+        elif entry["interface"] == "service_client":
+            iface = iface.Request
+    except Exception as e:
+        logger.error(f"[cap-scan] Drop capability '{entry['name']}' - cannot import {entry['type']}: {e}")
+        return None
 
-        merged = []
-        for cap in caps_section:
-            name = cap['name']
-
-            # Filter – skip if the capability wasn’t discovered at runtime
-            if name not in dyn_map:
-                self.get_logger().info(
-                    f"Skipping {section_name} '{name}' — in robot_caps.yaml "
-                    f"but not found by scanner.")
-                continue
-
-            scanned = dyn_map[name]
-
-            # Start with scanned, then overlay robot_caps
-            merged_item = scanned.copy()
-            for key, value in cap.items():
-                if key == 'params' and isinstance(value, dict):
-                    dyn_params = scanned.get('params', {})
-                    merged_item['params'] = merge_params(dyn_params, value)
-                elif key != 'name':
-                    merged_item[key] = value
-
-            merged.append(merged_item)
-
-        return merged
-
-    merged_topics = merge_section(dynamic_manifest.get('topics', []), robot_caps.get('topics', []), 'topic')
-    merged_actions = merge_section(dynamic_manifest.get('actions', []), robot_caps.get('actions', []), 'action')
-    merged_builtins = robot_caps.get('builtins', [])
-
-    return {'topics': merged_topics, 'actions': merged_actions, 'builtins': merged_builtins}
+    auto_params  = extract_params_from_msg(logger, iface)
+    locked       = entry.get("params", {})
+    entry["params"] = merge_params(auto_params, locked)
+    return entry
 
 
-def load_dynamic_manifest(self):
-    manifest = {'topics': [], 'actions': []}
+def build_manifest_from_caps(self, robot_caps: dict) -> dict:
+    """
+    Build a manifest that contains only the capabilities declared in
+    robot_caps.yaml.  Non-builtin entries are hydrated (auto-derived
+    params + YAML lock-ins).  Any entry whose interface class cannot
+    be imported is dropped.
+    """
+    # create empty lists for every category defined in the constant
+    manifest = {cat: [] for cat in CapabilityCategory.ordered()}
 
-    # --- 1. Scan topics ---
-    topic_types = self.get_topic_names_and_types()
-    for topic_name, type_list in topic_types:
-        # self.get_logger().info(f"Discovered topic: {topic_name} with types: {type_list}")
-        # Some topics might have multiple types; pick the first
-        msg_type_str = type_list[0]
-
-        # Skip internal action message types
-        if (
-            msg_type_str.endswith('FeedbackMessage') or
-            msg_type_str.endswith('Result') or
-            msg_type_str.endswith('Goal')
-        ):
+    for section in CapabilityCategory.ordered():
+        # builtins are copied verbatim (no hydration)
+        if section == CapabilityCategory.BUILTIN.value:
+            manifest[section] = robot_caps.get(section, [])
             continue
 
-        try:
-            msg_cls = import_ros_type(self, msg_type_str)
-        except Exception as e:
-            self.get_logger().error(f"Failed to import message class for {msg_type_str}: {e}")
-            continue
-        params = extract_params_from_msg(self, msg_cls)
-        entry = {
-            'plugin_name': topic_name,
-            'type': msg_type_str,
-            'name': f"Set{topic_name.strip('/').replace('/', '_').capitalize()}",
-            'params': params,
-        }
-        manifest['topics'].append(entry)
-
-    # --- 2. Scan actions ---
-    action_map = discover_actions(self)  # { '/navigate_to_pose': 'nav2_msgs/action/NavigateToPose' }
-    for action_name, action_type in action_map.items():
-        try:
-            action_cls = import_ros_type(self, action_type)
-        except Exception as e:
-            self.get_logger().error(f"Failed to import action class for {action_type}: {e}")
-            continue
-        params = extract_params_from_msg(self, action_cls.Goal)  # Use the Goal submessage for params
-        entry = {
-            'plugin_name': action_name,
-            'type': action_type,
-            'name': f"{action_type.split('/')[-1]}",
-            'params': params,
-            'interface': 'action_client',
-        }
-        manifest['actions'].append(entry)
+        # topics / actions / services → hydrate + lock-in
+        for cap in robot_caps.get(section, []):
+            hydrated = _hydrate_entry(cap.copy(), self.get_logger())
+            if hydrated:
+                manifest[section].append(hydrated)
 
     return manifest
-
-
-def discover_actions(node):
-    """Return a dict of {action_base_name: action_type} for available actions."""
-    service_types = dict(node.get_service_names_and_types())
-    actions = {}
-    for service, types in service_types.items():
-        # ROS2 actions have a service named `/my_action/_action/send_goal`
-        if service.endswith('/_action/send_goal'):
-            action_base = service[:-len('/_action/send_goal')]  # e.g. /navigate_to_pose
-            # Try to extract the real action type (e.g., nav2_msgs/action/NavigateToPose)
-            # The type looks like 'nav2_msgs/action/NavigateToPose_SendGoal'
-            action_type = types[0]
-            if action_type.endswith('_SendGoal'):
-                action_type = action_type[:-len('_SendGoal')]
-            actions[action_base] = action_type
-    return actions
 
 
 class CapabilityScannerNode(Node):
 
     def __init__(self):
         super().__init__('capability_scanner')
-        self.dynamic_manifest = load_dynamic_manifest(self)
+        # 1. Load YAML
         self.robot_caps = load_robot_capabilities(self)
-        final_manifest = merge_manifest_with_capabilities(self, self.dynamic_manifest, self.robot_caps)
 
-        # Publish manifest
+        # 2. Build manifest purely from YAML (no live scan)
+        final_manifest = build_manifest_from_caps(self, self.robot_caps)
+
+        # 3. Publish once with TRANSIENT_LOCAL QoS
         qos_profile = QoSProfile(
             depth=1,
             durability=QoSDurabilityPolicy.TRANSIENT_LOCAL

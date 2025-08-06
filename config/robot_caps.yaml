@@ -11,49 +11,105 @@ robot_caps:
         pose_header_frame_id:
           type: "str"
           value: "map"
+
   topics:
     - name: "SetCmd_vel"
       type: "geometry_msgs/msg/Twist"
       plugin_name: "/cmd_vel"
       description: "Set robot linear and angular velocities indefinitely until further notice."
       interface: "topic_publisher"
+
+  services:
+    - name: "SaveMap"
+      type: "nav2_msgs/srv/SaveMap"
+      plugin_name: "/map_saver/save_map"
+      interface: "service_client"
+      description: "Save the current map to a file using nav2_map_server. Succeeds StartFrontierExploration and only if StartFrontierExploration finishes successfully."
+      params:
+        map_topic:            {type: str, value: "/map"}          # <- field names per srv definition
+        map_dir:              {type: str, value: "~/.ros/maps"}   # directory, not file stem
+        map_stem:             {type: str, value: "first_map"}    # e.g. "kitchen_map"
+        image_format:         {type: str, value: "png"}
+        use_unique_timestamp: {type: bool, value: false}
+
   builtins:
-    # - name: "DontUse"
-    #   plugin_name: "DontUse"
-    #   class_file: "command_adapter"
-    #   description: "Don't use this builtin, it is just a placeholder."
-    #   params:
-    #     duration: "float"
-    #   interface: "builtin"
-    # ─────────────────────────────────────────────────────────────
-    # Start SLAM ‣ stop any Nav2 bringup & relaunch in SLAM mode
-    # ─────────────────────────────────────────────────────────────
-    - name: "StartSLAMMapping"
+    # ────────────────────────────────────────────────────────────────
+    # A. Nav2 with SLAM  (build a map live)
+    # ────────────────────────────────────────────────────────────────
+    - name: "StartNav2WithSLAM"
       class_name: "LaunchManager"
       class_file: "launch_manager_adapter"
       interface: "builtin"
-      description: "Restart Nav2 with slam:=True so the robot can build a map."
+      description: "Launch nav2_bringup/navigation_launch.py in SLAM mode. Succeeds StartSLAMToolbox and only if StartSLAMToolbox finishes successfully."
       params:
-        launch_file:
-          type: str
-          value: "nav2_bringup/bringup_launch.py"
+        launch_file:    {type: str, value: "nav2_bringup navigation_launch.py"}
+        launch_args:    {type: str, value: "slam:=True autostart:=True use_sim_time:=True"}
+        match_glob:     {type: str, value: "navigation_launch.py|bringup_launch.py|navigation2.launch.py"}   # which procs to stop
+        success_topics: {type: str, value: "/map"}
 
-        launch_args:
-          type: str
-          value: "slam:=True autostart:=True use_sim_time:=True"
+    # ──────────────────────────────────────────────────────────────
+    # B. Start SLAM Toolbox
+    # ──────────────────────────────────────────────────────────────
+    - name: StartSLAMToolbox
+      class_name: LaunchManager
+      class_file: launch_manager_adapter
+      interface: builtin
+      description: "Launch SLAM Toolbox (online_async_launch). Launch this prior to StartNav2WithSLAM to build a map."
+      params:
+        launch_file:    {type: str, value: "slam_toolbox online_async_launch.py"}
+        launch_args:    {type: str, value: "use_sim_time:=True"}
+        match_glob:     {type: str, value: "online_async_launch.py"}
+        success_topics: {type: str, value: "/slam_toolbox/feedback"}
 
-        match_glob:
-          type: str
-          value: "*bringup_launch*"     # which procs to stop
+    # ──────────────────────────────────────────────────────────────
+    # C. Start Frontier Exploration (nav2_wfd explore)
+    # ──────────────────────────────────────────────────────────────
+    - name: StartFrontierExploration
+      class_name: FrontierExplorationAdapter
+      class_file: wavefront_frontier_adapter
+      interface: builtin
+      description: "Start autonomous frontier exploration using Wavefront algorithm. Succeeds StartNav2WithSLAM and only if StartNav2WithSLAM finishes successfully"
+      params: {}   # no slots needed; optional starting_pose / retries could go here
 
-        success_topics:
-          type: str                     # comma-separated list
-          value: "/map,/slam_toolbox/pose"
+    # - name: SaveMap
+    #   class_name: RunProcessAdapter
+    #   class_file: run_process_adapter
+    #   interface: builtin
+    #   description: "Save the current map to a file using nav2_map_server. Succeeds StartFrontierExploration and only if StartFrontierExploration finishes successfully."
+    #   params:
+    #     cmd: {type: str,
+    #           value: "ros2 run nav2_map_server map_saver_cli -f ~/first_map"}
+
+
+    # ─────────────────────────────────────────────────────────────
+    # Start SLAM ‣ stop any Nav2 bringup & relaunch in SLAM mode
+    # ─────────────────────────────────────────────────────────────
+    # - name: "StartSLAMMapping"
+    #   class_name: "LaunchManager"
+    #   class_file: "launch_manager_adapter"
+    #   interface: "builtin"
+    #   description: "Restart Nav2 with slam:=True so the robot can build a map."
+    #   params:
+    #     launch_file:
+    #       type: str
+    #       value: "nav2_bringup navigation_launch.py"
+
+    #     launch_args:
+    #       type: str
+    #       value: "slam:=True autostart:=True use_sim_time:=True"
+
+    #     match_glob:
+    #       type: str
+    #       value: "bringup_launch"     # which procs to stop
+
+    #     success_topics:
+    #       type: str                     # comma-separated list
+    #       value: "/map,/slam_toolbox/pose"
 
     # ─────────────────────────────────────────────────────────────
     # Start Localization ‣ switch to static-map + AMCL mode
     # ─────────────────────────────────────────────────────────────
-    - name: "StartLocalization"
+    - name: "StartNav2WithMapAndAMCL"
       class_name: "LaunchManager"
       class_file: "launch_manager_adapter"
       interface: "builtin"
@@ -61,7 +117,7 @@ robot_caps:
       params:
         launch_file:
           type: str
-          value: "nav2_bringup/bringup_launch.py"
+          value: "nav2_bringup bringup_launch.py"
 
         launch_args:
           type: str
@@ -75,8 +131,8 @@ robot_caps:
 
         match_glob:
           type: str
-          value: "*bringup_launch*"
+          value: "navigation_launch.py|bringup_launch.py"
 
         success_topics:
           type: str
-          value: "/map,/amcl_pose"
+          value: "/map"
