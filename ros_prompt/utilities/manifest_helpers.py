@@ -1,5 +1,7 @@
 import importlib
 from ros_prompt.utilities.constants import CapabilityCategory
+from typing import Callable, Any, List
+import re
 
 MODULE_PREFIX = "ros_prompt.adapters_py.builtins"
 
@@ -21,21 +23,69 @@ def manifest_summary(manifest: dict) -> str:
         for item in manifest.get(cat, [])
     )
 
+def _to_bool(x) -> bool:
+    return x in (True, "true", "True", 1, "1", "yes", "on")
 
-def str_to_type(type_str):
+def _to_list_of_floats(x) -> List[float]:
+    # Accept nested lists, tuples, or strings with commas/spaces
+    if isinstance(x, (list, tuple)):
+        items = list(_flatten(x))
+    elif isinstance(x, str):
+        parts = [p for chunk in x.split(",") for p in chunk.strip().split()]
+        items = [p for p in parts if p != ""]
+    else:
+        items = [x]
+    return [float(v) for v in items]
+
+def _flatten(seq):
+    for x in seq:
+        if isinstance(x, (list, tuple)):
+            yield from _flatten(x)
+        else:
+            yield x
+
+def _to_covariance36(x) -> List[float]:
+    vals = _to_list_of_floats(x)
+    if len(vals) < 36:
+        vals = vals + [0.0] * (36 - len(vals))
+    elif len(vals) > 36:
+        vals = vals[:36]
+    return vals
+
+def str_to_type(type_str: Any) -> Callable[[Any], Any]:
     """
-    Convert a string type from the manifest to a Python type.
-    Expand as needed for your types.
+    Convert a manifest type string to a coercion function.
+    Supports scalars, List[float], float_array, covariance36
     """
     if type_str in [float, int, str, bool]:
         return type_str  # Already a Python type (if manifest is parsed with real types)
-    mapping = {
-        'float': float,
-        'int': int,
-        'str': str,
-        'bool': lambda x: x in [True, "true", "True", 1, "1"],
-    }
-    return mapping[type_str]
+    
+    if not isinstance(type_str, str):
+        raise ValueError(f"Unknown type '{type_str}'")
+    
+    t = type_str.strip()
+    tl = t.replace(" ", "").lower()
+
+    # Scalars
+    if tl == "float" or tl == "double":
+        return float
+    if tl in ("int", "int32", "int64"):
+        return int
+    if tl in ("str", "string"):
+        return str
+    if tl == "bool":
+        return _to_bool
+    
+    # Arrays
+    if tl in ("list[float]", "float[]", "floatarray", "float_array"):
+        return _to_list_of_floats
+    if re.fullmatch(r"(?i)list\[float\]", t):
+        return _to_list_of_floats
+    if tl in ("covariance36", "pose_covariance36"):
+        return _to_covariance36
+    
+    raise ValueError(f"Unknown type '{type_str}'")
+
 
 def find_manifest_entry(tag: str, manifest_map: dict) -> dict | None:
     """

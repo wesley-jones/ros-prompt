@@ -15,23 +15,28 @@ class GenericServiceAdapter:
     """
     def __init__(self, node, service_name, srv_type, timeout_sec: float = 5.0):
         self.node = node
+        self.service_name = service_name
+        self.timeout_sec = timeout_sec
+        self.cli = node.create_client(srv_type, service_name)
         self.node.get_logger().info(
             f"Creating GenericServiceAdapter for service: {service_name} "
             f"with type: {srv_type.__name__}"
         )
-        self.cli = node.create_client(srv_type, service_name)
-        self.service_name = service_name
 
-    # NOTE: returns the Future so callers can watch completion if they like
     def execute(self, **kwargs) -> Future:
         self.node.get_logger().info(
             f"Calling service {self.cli.srv_name} with data: {kwargs}"
         )
-        self.ensure_available()
+        self.ensure_available(timeout_sec=self.timeout_sec)
+
+        # Normalize path-related params *before* building the request
         self._prepare_map_path(kwargs)
+
+        # Build request and set only provided fields
         req = self.cli.srv_type.Request()
         for field, value in kwargs.items():
             set_nested_attr(req, field, value)
+
         return self.cli.call_async(req)
     
     def ensure_available(self, timeout_sec=5.0):
@@ -42,19 +47,18 @@ class GenericServiceAdapter:
     
     @staticmethod
     def _prepare_map_path(kwargs: dict, stem_key: str = "map_url", dir_key: str = "map_dir"):
-        """
-        Normalise the directory and stem parameters in-place.
-        Accepts either:
-        • map_url = "/abs/path/stem"           (classic Nav2 option)
-        • map_dir + map_stem = dir + stem      (ROS Prompt convenience)
-        """
-        if dir_key in kwargs:
-            base_dir = Path(os.path.expanduser(kwargs[dir_key])).resolve()
+        # Compose from map_dir + map_stem
+        if "map_dir" in kwargs:
+            base_dir = Path(os.path.expanduser(kwargs["map_dir"])).resolve()
             base_dir.mkdir(parents=True, exist_ok=True)
             stem = kwargs.get("map_stem", "map")
-            kwargs["map_url"] = str(base_dir / stem)
-        elif stem_key in kwargs:
-            p = Path(os.path.expanduser(kwargs[stem_key])).resolve()
-            p.parent.mkdir(parents=True, exist_ok=True)
-            kwargs[stem_key] = str(p)
-
+            kwargs["name"] = str(base_dir / stem)
+            # Drop keys that do not exist in slam_toolbox/srv/SaveMap
+            kwargs.pop("map_dir", None)
+            kwargs.pop("map_stem", None)
+            kwargs.pop("map_topic", None)
+            kwargs.pop("image_format", None)
+            kwargs.pop("map_mode", None)
+            kwargs.pop("free_thresh", None)
+            kwargs.pop("occupied_thresh", None)
+            return

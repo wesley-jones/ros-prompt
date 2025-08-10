@@ -1,7 +1,10 @@
 # ros_prompt/adapters_py/builtins/launch_manager.py
-from fastapi import params
-import py_trees, subprocess, signal, time, os, itertools
+import py_trees, subprocess, signal, time, os
 from pathlib import Path
+from nav2_msgs.srv import ManageLifecycleNodes
+
+
+_NAV2_LC_CMDS = {"startup": 1, "shutdown": 2, "reset": 3, "pause": 4, "resume": 5}
 
 class LaunchManager(py_trees.behaviour.Behaviour):
     """
@@ -20,12 +23,18 @@ class LaunchManager(py_trees.behaviour.Behaviour):
                  success_topics: str,
                  timeout_sec: int = 30,
                  name="LaunchManager",
+                 # lifecycle (optional)
+                #  lifecycle_manager: str | None = None,         # e.g. "/lifecycle_manager_localization"
+                #  lifecycle_command: str = "startup",
+                #  lifecycle_timeout_sec: int = 20,
+                #  wait_for_lifecycle: bool = True,
                  **kwargs):                 # ← accept any extra slots
         """
         `launch_args` comes in as one space-separated string.
         Any extra kwargs (e.g. map_yaml) are handled below.
         """
         super().__init__(name)
+        self.node = node
         self.get_logger = node.get_logger
         self.launch_file     = launch_file.split()  # ["bringup_launch.py"]
         self.launch_args     = launch_args.split()      # ["slam:=False", …]
@@ -38,6 +47,18 @@ class LaunchManager(py_trees.behaviour.Behaviour):
         if map_yaml:
             self.launch_args.append(f"map:={map_yaml}")
 
+        # lifecycle config
+        # self.lifecycle_manager = lifecycle_manager
+        # self.lifecycle_cmd_str = (lifecycle_command or "startup").lower().strip()
+        # self.lifecycle_timeout = lifecycle_timeout_sec
+        # self.wait_for_lifecycle = wait_for_lifecycle
+
+        # runtime fields
+        # self._lifecycle_client = None
+        # self._lifecycle_future = None
+        # self._lifecycle_sent   = False
+        # self._start_time       = None
+
         self.get_logger().info("LaunchManager initialized")
 
     # ── py_trees lifecycle ─────────────────────────────────────────────
@@ -48,30 +69,83 @@ class LaunchManager(py_trees.behaviour.Behaviour):
         self._proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, 
+            stderr=subprocess.STDOUT,
             text=True
         )
+
+        # Block until launch process exits, printing logs to the node's logger
+        # for line in self._proc.stdout:
+        #     self.get_logger().info(line.strip())
+
+        # self._proc.wait()
         self.get_logger().info("Launch command sent.")
         self._start_time  = time.time()
-        count  = 0
-        # while count < 200 and time.time() - self._start_time < 30.0:
-        #     line = self._proc.stdout.readline()
-        #     if line:
-        #         self.get_logger().info(f"[Launch Output] {line.rstrip()}")
-        #         count += 1
-        #     elif self._proc.poll() is not None:
-        #         # no data *and* child exited
-        #         break
-        #     else:
-        #         # no data yet, child still running → brief sleep
-        #         time.sleep(0.1)
+
+        # Prepare lifecycle client (don’t call yet)
+        # if self.lifecycle_manager:
+        #     svc_name = f"{self.lifecycle_manager.rstrip('/')}/manage_nodes"
+        #     self._lifecycle_client = self.node.create_client(ManageLifecycleNodes, svc_name)
+            # don’t block hard; we’ll poll readiness in update()
 
     def update(self):
-        if self._all_topics_ready():
+        topics_ready = self._all_topics_ready()
+        self.get_logger().info(f"Topics ready: {topics_ready}")
+
+        # # Once topics are ready, issue lifecycle (once)
+        # if topics_ready and self.lifecycle_manager and not self._lifecycle_sent:
+        #     # wait for service (non-blocking poll with short timeout)
+        #     if self._lifecycle_client.service_is_ready() or \
+        #        self._lifecycle_client.wait_for_service(timeout_sec=0.1):
+        #         cmd = _NAV2_LC_CMDS.get(self.lifecycle_cmd_str)
+        #         if cmd is None:
+        #             self.get_logger().error(f"Unknown lifecycle_command '{self.lifecycle_cmd_str}'")
+        #             self._lifecycle_sent = True  # prevent retry spam
+        #         else:
+        #             req = ManageLifecycleNodes.Request()
+        #             req.command = cmd
+        #             self.get_logger().info(
+        #                 f"Issuing lifecycle '{self.lifecycle_cmd_str}' ({cmd}) to "
+        #                 f"{self._lifecycle_client.srv_name}"
+        #             )
+        #             self._lifecycle_future = self._lifecycle_client.call_async(req)
+        #             self._lifecycle_sent = True
+        #     else:
+        #         # service not ready yet; keep running until it comes up or we time out
+        #         pass
+
+        # # If we sent lifecycle, optionally wait for its completion
+        # if self._lifecycle_future is not None and self.wait_for_lifecycle:
+        #     self.get_logger().info("Waiting for lifecycle response...")
+        #     if self._lifecycle_future.done():
+        #         if self._lifecycle_future.exception() is None:
+        #             resp = self._lifecycle_future.result()
+        #             # ManageLifecycleNodes has a 'success' bool
+        #             if getattr(resp, "success", True):
+        #                 self.get_logger().info(f"Lifecycle call succeeded: {resp}")
+        #                 # lifecycle done; now fall through to success logic below
+        #                 self._lifecycle_future = None
+        #             else:
+        #                 self.get_logger().error("Lifecycle call failed: " + str(resp))
+        #                 return py_trees.common.Status.FAILURE
+        #         else:
+        #             self.get_logger().error(f"Lifecycle call failed: {self._lifecycle_future.exception()}")
+        #             return py_trees.common.Status.FAILURE
+        #     else:
+        #         # still waiting for lifecycle response
+        #         if time.time() - self._start_time > self.timeout_sec:
+        #             self.get_logger().error(f"Lifecycle call timed out after {self.timeout_sec}s")
+        #             return py_trees.common.Status.FAILURE
+        #         return py_trees.common.Status.RUNNING
+
+        # Success condition
+        if topics_ready:
             return py_trees.common.Status.SUCCESS
+
+        # Timeout
         if time.time() - self._start_time > self.timeout_sec:
-            # self._proc.terminate()
+            self.get_logger().error(f"LaunchManager timed out after {self.timeout_sec}s")
             return py_trees.common.Status.FAILURE
+
         return py_trees.common.Status.RUNNING
 
     # ── helpers ────────────────────────────────────────────────────────

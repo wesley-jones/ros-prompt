@@ -258,13 +258,14 @@ class WaypointFollowerTest(Node):
         self.readyToMove = True
         self.currentPose = None
         self.lastWaypoint = None
+        self.last_goal_xy   = None     # last goal we sent (x, y)
         self.action_client = ActionClient(self, FollowWaypoints, '/follow_waypoints')
         self.initial_pose_pub = self.create_publisher(PoseWithCovarianceStamped,
                                                       'initialpose', 10)
 
         self.costmapClient = self.create_client(GetCostmap, '/global_costmap/get_costmap')
-        while not self.costmapClient.wait_for_service(timeout_sec=1.0):
-            self.info_msg('service not available, waiting again...')
+        # while not self.costmapClient.wait_for_service(timeout_sec=1.0):
+            # self.info_msg('service not available, waiting again...')
         self.initial_pose_received = False
         self.goal_handle = None
 
@@ -332,10 +333,13 @@ class WaypointFollowerTest(Node):
         location = None
         largestDist = 0
         for f in frontiers:
+            # skip if exactly the same as last goal
+            if self.last_goal_xy and (f[0] == self.last_goal_xy[0] and f[1] == self.last_goal_xy[1]):
+                break
             dist = math.sqrt(((f[0] - self.currentPose.position.x)**2) + ((f[1] - self.currentPose.position.y)**2))
             if  dist > largestDist:
                 largestDist = dist
-                location = [f] 
+                location = [f]
 
         #worldFrontiers = [self.costmap.mapToWorld(f[0], f[1]) for f in frontiers]
         self.info_msg(f'World points {location}')
