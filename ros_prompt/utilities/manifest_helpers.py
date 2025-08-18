@@ -1,53 +1,102 @@
 import importlib
+from ros_prompt.utilities.constants import CapabilityCategory
+from typing import Callable, Any, List
+import re
 
 MODULE_PREFIX = "ros_prompt.adapters_py.builtins"
 
 def manifest_summary(manifest: dict) -> str:
-    lines = []
-    # Topics and Actions
-    for category in ["topics", "actions"]:
-        for item in manifest.get(category, []):
-            name = item['name']
-            params = ', '.join(item['params'].keys())
-            desc = item.get('description', '')
-            lines.append(f"- {name}: {desc or 'No description.'} ({params})")
-    # Builtins (if you want to include)
-    for item in manifest.get('builtins', []):
-        name = item['name']
-        params = ', '.join(item['params'].keys())
-        desc = item.get('description', '')
-        lines.append(f"- {name}: {desc or 'No description.'} ({params})")
-    return "\n".join(lines)
-
-def str_to_type(type_str):
     """
-    Convert a string type from the manifest to a Python type.
-    Expand as needed for your types.
+    Produce one line per capability:
+      - <Name>: <description> (<param1, param2, ...>)
+    Searches topics, actions, services, builtins in that order.
+    """
+    def fmt(item: dict) -> str:
+        desc   = item.get("description", "No description.")
+        params = ", ".join(item.get("params", {}).keys()) or "no params"
+        return f"- {item['name']}: {desc} ({params})"
+
+    categories = CapabilityCategory.ordered()
+    return "\n".join(
+        fmt(item)
+        for cat in categories
+        for item in manifest.get(cat, [])
+    )
+
+def _to_bool(x) -> bool:
+    return x in (True, "true", "True", 1, "1", "yes", "on")
+
+def _to_list_of_floats(x) -> List[float]:
+    # Accept nested lists, tuples, or strings with commas/spaces
+    if isinstance(x, (list, tuple)):
+        items = list(_flatten(x))
+    elif isinstance(x, str):
+        parts = [p for chunk in x.split(",") for p in chunk.strip().split()]
+        items = [p for p in parts if p != ""]
+    else:
+        items = [x]
+    return [float(v) for v in items]
+
+def _flatten(seq):
+    for x in seq:
+        if isinstance(x, (list, tuple)):
+            yield from _flatten(x)
+        else:
+            yield x
+
+def _to_covariance36(x) -> List[float]:
+    vals = _to_list_of_floats(x)
+    if len(vals) < 36:
+        vals = vals + [0.0] * (36 - len(vals))
+    elif len(vals) > 36:
+        vals = vals[:36]
+    return vals
+
+def str_to_type(type_str: Any) -> Callable[[Any], Any]:
+    """
+    Convert a manifest type string to a coercion function.
+    Supports scalars, List[float], float_array, covariance36
     """
     if type_str in [float, int, str, bool]:
         return type_str  # Already a Python type (if manifest is parsed with real types)
-    mapping = {
-        'float': float,
-        'int': int,
-        'str': str,
-        'bool': lambda x: x in [True, "true", "True", 1, "1"],
-    }
-    return mapping[type_str]
+    
+    if not isinstance(type_str, str):
+        raise ValueError(f"Unknown type '{type_str}'")
+    
+    t = type_str.strip()
+    tl = t.replace(" ", "").lower()
 
-def find_manifest_entry(tag, manifest_map):
-    # Search topics
-    for topic in manifest_map.get('topics', []):
-        if topic.get('name') == tag or topic.get('name') == tag:
-            return topic
-    # Search actions
-    for action in manifest_map.get('actions', []):
-        if action.get('name') == tag or action.get('name') == tag:
-            return action
-    # Search builtins
-    for builtin in manifest_map.get('builtins', []):
-        if builtin.get('name') == tag:
-            return builtin
-    return None  # Not found
+    # Scalars
+    if tl == "float" or tl == "double":
+        return float
+    if tl in ("int", "int32", "int64"):
+        return int
+    if tl in ("str", "string"):
+        return str
+    if tl == "bool":
+        return _to_bool
+    
+    # Arrays
+    if tl in ("list[float]", "float[]", "floatarray", "float_array"):
+        return _to_list_of_floats
+    if re.fullmatch(r"(?i)list\[float\]", t):
+        return _to_list_of_floats
+    if tl in ("covariance36", "pose_covariance36"):
+        return _to_covariance36
+    
+    raise ValueError(f"Unknown type '{type_str}'")
+
+
+def find_manifest_entry(tag: str, manifest_map: dict) -> dict | None:
+    """
+    Return the first entry in manifest_map whose 'name' matches *tag*.
+    Searches topics → actions → services → builtins (keep legacy order).
+    """
+    for section in CapabilityCategory.ordered():
+        for entry in manifest_map.get(section, []):
+            if entry.get("name") == tag:
+                return entry
+    return None
 
 def validate_and_coerce_attributes(tag, attrib, manifest_map):
     """
@@ -55,11 +104,11 @@ def validate_and_coerce_attributes(tag, attrib, manifest_map):
 
     Precedence (highest first):
         1. param_spec['value']        -> *hard constant* (overrides runtime)
-        2. runtime XML attribute      -> user/operator override
+        2. runtime attribute          -> user/operator override
         3. param_spec['default']      -> fallback
         (skip param if none of the above provides a value)
 
-    If XML supplies a value that conflicts with a fixed constant
+    If LLM supplies a value that conflicts with a fixed constant
     (i.e. a 'value' entry in YAML), we keep the constant and log a warning.
     """
     cap = find_manifest_entry(tag, manifest_map)
@@ -126,7 +175,7 @@ def validate_and_coerce_attributes(tag, attrib, manifest_map):
 
 def load_class_from_manifest_entry(manifest_entry):
     file_name = manifest_entry['class_file']
-    class_name = manifest_entry['name']
+    class_name = manifest_entry['class_name']
     module_name = f"{MODULE_PREFIX}.{file_name}"
     module = importlib.import_module(module_name)
     cls = getattr(module, class_name)

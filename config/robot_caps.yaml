@@ -1,3 +1,5 @@
+# This file is used to define the supported robot capabilities and actions available to ROS Prompt.
+# Any parameters provided here will override anything returned by the LLM.
 robot_caps:
   actions:
     - name: "NavigateToPose"
@@ -9,17 +11,167 @@ robot_caps:
         pose_header_frame_id:
           type: "str"
           value: "map"
+        behavior_tree:
+          type: "str"
+          value: ""
+
   topics:
     - name: "SetCmd_vel"
       type: "geometry_msgs/msg/Twist"
       plugin_name: "/cmd_vel"
       description: "Set robot linear and angular velocities indefinitely until further notice."
       interface: "topic_publisher"
-  # builtins:
-    # - name: "DontUse"
-    #   plugin_name: "DontUse"
-    #   class_file: "command_adapter"
-    #   description: "Don't use this builtin, it is just a placeholder."
-    #   params:
-    #     duration: "float"
+    - name: "SetInitialPose"
+      type: "geometry_msgs/msg/PoseWithCovarianceStamped"
+      plugin_name: "/initialpose"
+      description: "Set the robot's initial pose in the map frame for localization. Succeeds StartNav2WithMap and only if StartNav2WithMap finishes successfully."
+      interface: "topic_publisher"
+      params:
+        header_stamp_sec:
+          type: "int"
+          value: 0
+        header_stamp_nanosec:
+          type: "int"
+          value: 0
+        header_frame_id:
+          type: "str"
+          value: "map"
+        pose_pose_position_x:
+          type: "float"
+          value: -1.8
+        pose_pose_position_y:
+          type: "float"
+          value: -0.5
+        pose_pose_position_z:
+          type: "float"
+          value: 0.0
+        pose_pose_orientation_x:
+          type: "float"
+          value: 0.0
+        pose_pose_orientation_y:
+          type: "float"
+          value: 0.0
+        pose_pose_orientation_z:
+          type: "float"
+          value: 0.0
+        pose_pose_orientation_w:
+          type: "float"
+          value: 1.0
+        pose_covariance:
+          type: "List[float]"
+          value: [0.25, 0, 0, 0, 0, 0,
+                  0, 0.25, 0, 0, 0, 0,
+                  0, 0, 0.01, 0, 0, 0,
+                  0, 0, 0, 0.01, 0, 0,
+                  0, 0, 0, 0, 0.01, 0,
+                  0, 0, 0, 0, 0, 0.0685]
+
+  services:
+    - name: "SaveMap"
+      type: "slam_toolbox/srv/SaveMap"
+      plugin_name: "/slam_toolbox/save_map"
+      interface: "service_client"
+      description: "Save a map of an exploration session. Succeeds StartFrontierExploration and only if StartFrontierExploration finishes successfully."
+      params:
+        name_data:          {type: str, value: "~/.ros/maps/first_map"}
+
+
+  # ──────────────────  Built-in orchestration behaviours  ──────────────────
+  builtins:
+    # ────────────────────────────────────────────────────────────────
+    # Switch robot into live-mapping (SLAM) mode
+    # ────────────────────────────────────────────────────────────────
+    # - name: "SwitchToMappingMode"
+    #   class_name: "SwitchToMappingMode"         # class in builtin_nav_modes.py
+    #   class_file: "builtin_nav_modes"           # ros_prompt/adapters_py/builtins/
     #   interface: "builtin"
+    #   description: |
+    #     Shut down Nav2 and SLAM cleanly, launch SLAM Toolbox (online_async),
+    #     then launch Nav2 in slam:=True with autostart:=False and issue
+    #     lifecycle STARTUP. Succeeds when /map and /slam_toolbox/pose exist
+    #     and the Nav2 lifecycle manager reports ACTIVE.
+    #   params:
+    #     slam_launch: {type: str, value: "slam_toolbox online_async_launch.py"}
+    #     nav_launch:  {type: str, value: "nav2_bringup navigation_launch.py"}
+    #     common_args: {type: str, value: "use_sim_time:=True autostart:=False"}
+    #     nav_args:    {type: str, value: "slam:=True"}
+    #     timeout_sec: {type: int, value: 60}
+
+    # If you're on TurtleBot 4, you can override nav_launch like:
+    # nav_launch: {type: str, value: "turtlebot4_navigation nav2.launch.py"}
+
+    # ────────────────────────────────────────────────────────────────
+    # Start Nav2 with a saved map (localisation mode)
+    # ────────────────────────────────────────────────────────────────
+    # - name: "StartNavWithMap"
+    #   class_name: "StartNavWithMap"             # class in builtin_nav_modes.py
+    #   class_file: "builtin_nav_modes"
+    #   interface: "builtin"
+    #   description: |
+    #     Shut down Nav2 and SLAM, then launch Nav2 with slam:=False,
+    #     map:=<yaml>, autostart:=False, and issue lifecycle STARTUP.
+    #     Succeeds when /map is available.
+    #   params:
+    #     nav_launch:  {type: str,  value: "nav2_bringup navigation_launch.py"}
+    #     common_args: {type: str,  value: "use_sim_time:=True autostart:=False"}
+    #     nav_args:    {type: str,  value: "slam:=False"}
+    #     map_yaml:    {type: str,  default: "~/my_map.yaml"}
+    #     timeout_sec: {type: int,  value: 60}
+
+    # ────────────────────────────────────────────────────────────────
+    # A. Nav2 with SLAM  (build a map live)
+    # ────────────────────────────────────────────────────────────────
+    - name: "StartNav2WithSLAM"
+      class_name: "LaunchManager"
+      class_file: "launch_manager_adapter"
+      interface: "builtin"
+      description: "Launch nav2_bringup/navigation_launch.py in SLAM mode. Succeeds StartSLAMToolbox and only if StartSLAMToolbox finishes successfully."
+      params:
+        launch_file:    {type: str, value: "nav2_bringup navigation_launch.py"}
+        launch_args:    {type: str, value: "slam:=True autostart:=True use_sim_time:=True"}
+        match_glob:     {type: str, value: "navigation_launch.py|bringup_launch.py|navigation2.launch.py"}   # which procs to stop
+        success_topics: {type: str, value: "/map"}
+
+    # ──────────────────────────────────────────────────────────────
+    # B. Start SLAM Toolbox
+    # ──────────────────────────────────────────────────────────────
+    - name: StartSLAMToolbox
+      class_name: LaunchManager
+      class_file: launch_manager_adapter
+      interface: builtin
+      description: "Launch SLAM Toolbox (online_async_launch). Launch this prior to StartNav2WithSLAM to build a map."
+      params:
+        launch_file:    {type: str, value: "slam_toolbox online_async_launch.py"}
+        launch_args:    {type: str, value: "use_sim_time:=True"}
+        match_glob:     {type: str, value: "online_async_launch.py"}
+        success_topics: {type: str, value: "/slam_toolbox/feedback"}
+
+    # ──────────────────────────────────────────────────────────────
+    # Start Frontier Exploration (nav2_wfd explore)
+    # ──────────────────────────────────────────────────────────────
+    - name: StartFrontierExploration
+      class_name: FrontierExplorationAdapter
+      class_file: wavefront_frontier_adapter
+      interface: builtin
+      description: "Start autonomous frontier exploration using Wavefront algorithm. Succeeds StartNav2WithSLAM and only if StartNav2WithSLAM finishes successfully"
+      params: {}   # no slots needed; optional starting_pose / retries could go here
+
+    # ────────────────────────────────────────────────────────────────
+    # Nav2 with preloaded map (localisation mode)
+    # ────────────────────────────────────────────────────────────────
+    - name: "StartNav2WithMap"
+      class_name: "LaunchManager"
+      class_file: "launch_manager_adapter"
+      interface: "builtin"
+      description: "Launch nav2_bringup/bringup_launch.py in localisation mode. Succeeds SaveMap and only if SaveMap finishes successfully."
+      params:
+        launch_file:    {type: str, value: "nav2_bringup bringup_launch.py"}
+        launch_args:    {type: str, value: "slam:=False autostart:=True use_sim_time:=True"}
+        match_glob:     {type: str, value: "online_async_launch.py|navigation_launch.py|bringup_launch.py|navigation2.launch.py"}   # which procs to stop
+        success_topics: {type: str, value: "/map"}
+        # lifecycle_managers:   {type: str, value: "/lifecycle_manager_localization,/lifecycle_manager_navigation"}
+        # lifecycle_manager:   {type: str, value: "/lifecycle_manager_navigation"}
+        # lifecycle_command:   {type: str, value: "startup"}
+        # lifecycle_timeout_sec: {type: int, value: 60}
+        # wait_for_lifecycle:  {type: bool, value: true}
+        map_yaml: {type: str, value: "/home/wesley-jones/.ros/maps/first_map.yaml"}

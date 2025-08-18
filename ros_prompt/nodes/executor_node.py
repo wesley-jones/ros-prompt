@@ -4,7 +4,6 @@ from std_msgs.msg import String
 from rclpy.qos import QoSProfile, DurabilityPolicy
 import json
 import py_trees
-import xml.etree.ElementTree as ET
 import threading
 from ros_prompt.utilities.bt_builder import parse_bt_dict
 
@@ -70,7 +69,7 @@ class BTExecutorNode(Node):
                     if status in [py_trees.common.Status.SUCCESS, py_trees.common.Status.FAILURE]:
                         self.get_logger().info("Tree complete; clearing current_tree.")
                         self.current_tree = None
-                        self.current_tree_xml = None
+                        self.current_tree_json = None
 
             rate.sleep()
 

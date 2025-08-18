@@ -1,20 +1,29 @@
 import importlib
 
-def import_ros_type(self, msg_type_str):
-    # Accepts "geometry_msgs/msg/Vector3" or "geometry_msgs/Vector3" or "nav2_msgs/action/NavigateToPose"
-    parts = msg_type_str.split('/')
-    if len(parts) == 2:
-        # e.g., 'geometry_msgs/Vector3' → 'geometry_msgs/msg/Vector3'
-        pkg, msg = parts
-        msg_type_str = f"{pkg}/msg/{msg}"
-        parts = msg_type_str.split('/')
-    if len(parts) == 3:
-        pkg, subfolder, class_name = parts  # subfolder: 'msg' or 'action'
+def import_ros_type(self, type_str: str):
+    """
+    Accepts either fully-qualified   "pkg/{msg|srv|action}/Type"
+    or the two-token shorthand       "pkg/Type" (assumed msg).
+
+    Returns the generated Python class for that interface.
+    """
+    parts = type_str.split('/')
+
+    # ── Shorthand: default to messages ─────────────────────────────
+    if len(parts) == 2:                       # e.g. "geometry_msgs/Vector3"
+        pkg, cls = parts
+        subfolder = "msg"
+    # ── Fully-qualified form ───────────────────────────────────────
+    elif len(parts) == 3:                     # e.g. "nav2_msgs/srv/SaveMap"
+        pkg, subfolder, cls = parts
     else:
-        raise ValueError(f"Unexpected ROS message type string: {msg_type_str}")
-    module_name = f"{pkg}.{subfolder}"
-    mod = importlib.import_module(module_name)
-    return getattr(mod, class_name)
+        raise ValueError(f"Unexpected ROS type string: {type_str}")
+
+    if subfolder not in ("msg", "srv", "action"):
+        raise ValueError(f"Unsupported ROS interface: {subfolder}")
+
+    module = importlib.import_module(f"{pkg}.{subfolder}")
+    return getattr(module, cls)
 
 def set_nested_attr(msg, attr_path, value):
     """

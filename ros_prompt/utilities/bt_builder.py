@@ -6,6 +6,8 @@ from ros_prompt.adapters_py.generic_publisher_adapter import GenericPublisherAda
 from ros_prompt.behaviors_py.generic_bt_behaviour import GenericPublisherBehaviour
 from ros_prompt.adapters_py.generic_action_adapter import GenericActionAdapter
 from ros_prompt.behaviors_py.generic_action_behaviour import GenericActionBehaviour
+from ros_prompt.adapters_py.generic_service_adapter import GenericServiceAdapter
+from ros_prompt.behaviors_py.generic_service_behaviour import GenericServiceBehaviour
 
 def parse_bt_dict(self, bt_dict, manifest_map):
 
@@ -70,9 +72,13 @@ def parse_bt_dict(self, bt_dict, manifest_map):
                 action_class = import_ros_type(self, cap["type"])
                 adapter = GenericActionAdapter(self, cap["plugin_name"], action_class)
                 behaviour = GenericActionBehaviour(adapter, coerced_params, self, name=tag)
+            elif interface == "service_client":
+                srv_class = import_ros_type(self, cap["type"])
+                adapter = GenericServiceAdapter(self, cap["plugin_name"], srv_class)
+                behaviour = GenericServiceBehaviour(adapter, coerced_params, self, name=tag)
             elif interface == "builtin":
                 behaviour_class = load_class_from_manifest_entry(cap)
-                behaviour = behaviour_class(**coerced_params, name=tag)
+                behaviour = behaviour_class(node=self, **coerced_params, name=tag)
             else:
                 raise ValueError(f"Unknown capability interface: {interface}")
             return behaviour

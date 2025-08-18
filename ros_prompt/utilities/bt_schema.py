@@ -1,4 +1,5 @@
 # schema_builder.py
+from ros_prompt.utilities.constants import CapabilityCategory
 
 def json_type(manifest_type):
     """Map manifest type to JSON Schema type."""
@@ -135,14 +136,13 @@ def build_behavior_tree_schema(manifest):
         "additionalProperties": False
     }
 
+    action_nodes = [
+        make_action_schema(item)
+        for category in CapabilityCategory.ordered()
+        for item in manifest.get(category, [])
+    ]
 
-    # Action nodes from topics
-    topic_actions = [make_action_schema(topic, is_topic=True) for topic in manifest.get("topics", [])]
-    # Action nodes from actions
-    real_actions = [make_action_schema(action) for action in manifest.get("actions", [])]
-    # Builtins (treat same as actions)
-    builtins = [make_action_schema(builtin) for builtin in manifest.get("builtins", [])]
-    all_nodes = composites + decorators + [timer_node] + topic_actions + real_actions + builtins
+    all_nodes = composites + decorators + [timer_node] + action_nodes
     schema = {
         "title": "BehaviorTree",
         "description": (
