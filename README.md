@@ -8,7 +8,8 @@
 
 Natural language robot control for ROS 2 using LLMs (LangChain).
 
-[![Demo](https://github.com/wesley-jones/ros-prompt/releases/download/v0.1.0-alpha/thumbnail.png)](https://github.com/wesley-jones/ros-prompt/releases/download/v0.1.0-alpha/ros-prompt-demo.mp4)
+#### ROS Prompt Demo: Autonomously switch between SLAM and Navigation mode (click for YouTube)
+[![ROS Prompt YouTube Thumbnail](https://img.youtube.com/vi/3zefdX6pDP0/0.jpg)](https://youtu.be/3zefdX6pDP0)
 
 ## Features
 - Understands and plans robot actions from natural language
