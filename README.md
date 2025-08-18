@@ -8,6 +8,8 @@
 
 Natural language robot control for ROS 2 using LLMs (LangChain).
 
+[![Demo](https://github.com/wesley-jones/ros-prompt/releases/download/v0.1.0-alpha/thumbnail.png)](https://github.com/wesley-jones/ros-prompt/releases/download/v0.1.0-alpha/ros-prompt-demo.mp4)
+
 ## Features
 - Understands and plans robot actions from natural language
 - Automatic capability discovery (topics, actions, services)
@@ -16,8 +18,14 @@ Natural language robot control for ROS 2 using LLMs (LangChain).
 
 ## Getting Started
 1. Run `export ROS_PROMPT_OPENAI_KEY="sk-..."` with your own API key.
-2. colcon build
-3. ros2 launch ros_prompt ros_prompt.launch.py
+2. pip install py_trees langchain langchain_openai jsonschema
+3. Clone ros-prompt into your ROS workspace
+4. colcon build --packages-select ros_prompt
+5. source install/setup.bash
+6. Start your launch files (ie. ros2 launch turtlebot3_gazebo turtlebot3_world.launch.py)
+7. ros2 launch ros_prompt ros_prompt.launch.py
+8. Publish your messages to /user_input: 
+ros2 topic pub /user_input std_msgs/String "data: 'start slam, explore, save map, swith to nav with map, set initial pose, wait for 12 seconds, navigate to position (0.6, 1.5)'" -1
 
 
 ## License
